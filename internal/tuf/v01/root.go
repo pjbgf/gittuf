@@ -1128,3 +1128,34 @@ func (g *GitHubApp) GetThreshold() int {
 func (g *GitHubApp) IsTrusted() bool {
 	return g.Trusted
 }
+
+// AddCedarPolicy is not supported for the v01 metadata version.
+func (r *RootMetadata) AddCedarPolicy(_ string, _ map[string]string) (tuf.CedarPolicy, error) {
+	return nil, tuf.ErrInvalidOperationForMetadataVersion
+}
+
+// RemoveCedarPolicy is not supported for the v01 metadata version.
+func (r *RootMetadata) RemoveCedarPolicy(_ string) error {
+	return tuf.ErrInvalidOperationForMetadataVersion
+}
+
+// GetCedarPolicies returns no cedar policies; v01 metadata cannot declare
+// them.
+func (r *RootMetadata) GetCedarPolicies() ([]tuf.CedarPolicy, error) {
+	return nil, tuf.ErrNoCedarPoliciesDefined
+}
+
+// AddGroup is not supported for the v01 metadata version.
+func (r *RootMetadata) AddGroup(_ string, _ []string) error {
+	return tuf.ErrInvalidOperationForMetadataVersion
+}
+
+// RemoveGroup is not supported for the v01 metadata version.
+func (r *RootMetadata) RemoveGroup(_ string) error {
+	return tuf.ErrInvalidOperationForMetadataVersion
+}
+
+// GetGroups returns no groups; v01 metadata cannot declare them.
+func (r *RootMetadata) GetGroups() (map[string][]string, error) {
+	return nil, tuf.ErrNoGroupsDefined
+}

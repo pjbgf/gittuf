@@ -41,6 +41,10 @@ const (
 	HookEnvironmentLuaString = "lua"
 
 	HooksPrefix = "hooks"
+
+	// CedarPrefix is the directory in the policy tree that stores Cedar
+	// policy blobs.
+	CedarPrefix = "cedar"
 )
 
 var (
@@ -75,6 +79,12 @@ var (
 	ErrInvalidHookEnvironment                          = errors.New("invalid environment for hook")
 	ErrHookNotFound                                    = errors.New("cannot find hook entry")
 	ErrNoHooksDefined                                  = errors.New("no hooks defined")
+	ErrDuplicatedCedarPolicyName                       = errors.New("two cedar policies with same name found in policy")
+	ErrCedarPolicyNotFound                             = errors.New("cannot find cedar policy entry")
+	ErrNoCedarPoliciesDefined                          = errors.New("no cedar policies defined")
+	ErrGroupAlreadyExists                              = errors.New("group already exists")
+	ErrGroupNotFound                                   = errors.New("group not found")
+	ErrNoGroupsDefined                                 = errors.New("no groups defined")
 )
 
 // Principal represents an entity that is granted trust by gittuf metadata. In
@@ -230,6 +240,24 @@ type RootMetadata interface {
 	RemoveHook(stages []HookStage, hookName string) error
 	// GetHooks returns all hooks in the metadata for the specified Git stage.
 	GetHooks(stage HookStage) ([]Hook, error)
+
+	// AddCedarPolicy adds a cedar policy file, identified by the provided
+	// hashes, to the metadata. The policy is applied as a forbid-only veto
+	// during verification.
+	AddCedarPolicy(policyName string, hashes map[string]string) (CedarPolicy, error)
+	// RemoveCedarPolicy removes the cedar policy identified by policyName.
+	RemoveCedarPolicy(policyName string) error
+	// GetCedarPolicies returns all cedar policies in the metadata.
+	GetCedarPolicies() ([]CedarPolicy, error)
+
+	// AddGroup declares a group of principals that cedar policies can refer
+	// to via `Gittuf::Group`. Member IDs are resolved against all declared
+	// principals at verification time.
+	AddGroup(groupName string, principalIDs []string) error
+	// RemoveGroup removes the group identified by groupName.
+	RemoveGroup(groupName string) error
+	// GetGroups returns all groups declared in the metadata.
+	GetGroups() (map[string][]string, error)
 }
 
 // TargetsMetadata represents gittuf's rule files. Its name is inspired by TUF.
@@ -552,6 +580,20 @@ type Hook interface {
 
 	// GetTimeout returns the maximum duration the hook can run for, in seconds.
 	GetTimeout() int
+}
+
+// CedarPolicy represents a Cedar policy file declared in the gittuf root of
+// trust ('RootMetadata'). The policy contents are stored as a Git blob in the
+// policy tree, identified by the declared hashes (like Hook).
+type CedarPolicy interface {
+	// ID returns the identifier of the cedar policy, typically a name.
+	ID() string
+
+	// GetHashes returns the hashes identifying the cedar policy file.
+	GetHashes() map[string]string
+
+	// GetBlobID returns the Git blob ID for the cedar policy file.
+	GetBlobID() gitinterface.Hash
 }
 
 type GitHubApp interface {
