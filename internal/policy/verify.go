@@ -872,41 +872,40 @@ func verifyEntry(ctx context.Context, repo gitstore.Storer, policy *State, attes
 		return fmt.Errorf("verifying Git namespace policies failed, %w", ErrVerificationFailed)
 	}
 
-	// Check if policy has file rules at all for efficiency
-	if !policy.hasFileRule {
-		// No file rules to verify
-		return nil
-	}
+	if policy.hasFileRule {
+		// Verify modified files
 
-	// Verify modified files
-
-	// First, get all commits between the current and last entry for the ref.
-	commitIDs, err := getCommits(repo, entry) // note: this is ordered by commit ID
-	if err != nil {
-		return err
-	}
-
-	for _, commitID := range commitIDs {
-		paths, err := repo.GetFilePathsChangedByCommit(commitID)
+		// First, get all commits between the current and last entry for the ref.
+		commitIDs, err := getCommits(repo, entry) // note: this is ordered by commit ID
 		if err != nil {
 			return err
 		}
 
-		verifiedUsing := "" // this will be set after one successful verification of the commit to avoid repeated signature verification
-		for _, path := range paths {
-			// If we've already verified and identified commit signature, we
-			// can just check if that verifier is trusted for the new path.
-			// If not found, we don't make any assumptions about it being a
-			// failure in case of name mismatches. So, the signature check
-			// proceeds as usual.
-			verifiedUsing, _, err = verifyGitObjectAndAttestations(ctx, policy, fmt.Sprintf("%s:%s", fileRuleScheme, path), commitID, authorizationAttestation, withApproverPrincipalIDs(approverKeyIDs), withTrustedVerifier(verifiedUsing))
+		for _, commitID := range commitIDs {
+			paths, err := repo.GetFilePathsChangedByCommit(commitID)
 			if err != nil {
-				return fmt.Errorf("verifying file namespace policies failed, %w", ErrVerificationFailed)
+				return err
+			}
+
+			verifiedUsing := "" // this will be set after one successful verification of the commit to avoid repeated signature verification
+			for _, path := range paths {
+				// If we've already verified and identified commit signature, we
+				// can just check if that verifier is trusted for the new path.
+				// If not found, we don't make any assumptions about it being a
+				// failure in case of name mismatches. So, the signature check
+				// proceeds as usual.
+				verifiedUsing, _, err = verifyGitObjectAndAttestations(ctx, policy, fmt.Sprintf("%s:%s", fileRuleScheme, path), commitID, authorizationAttestation, withApproverPrincipalIDs(approverKeyIDs), withTrustedVerifier(verifiedUsing))
+				if err != nil {
+					return fmt.Errorf("verifying file namespace policies failed, %w", ErrVerificationFailed)
+				}
 			}
 		}
 	}
 
-	return nil
+	// Apply the Cedar veto over the full change context. This must run even
+	// when no file rules exist and for namespaces no rule protects: veto
+	// policies apply repository-wide.
+	return applyCedarVeto(ctx, repo, policy, entry)
 }
 
 func verifyTagEntry(ctx context.Context, repo gitstore.Storer, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) error {
@@ -933,7 +932,7 @@ func verifyTagEntry(ctx context.Context, repo gitstore.Storer, policy *State, at
 		return fmt.Errorf("verifying tag entry failed, %w: %w", ErrVerificationFailed, err)
 	}
 
-	return nil
+	return applyCedarVeto(ctx, repo, policy, entry)
 }
 
 func getApproverAttestationAndKeyIDs(ctx context.Context, repo gitstore.Storer, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) (*sslibdsse.Envelope, *set.Set[string], error) {

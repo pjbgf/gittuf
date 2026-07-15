@@ -1094,6 +1094,63 @@ func createTestStateWithTagPolicyForUnauthorizedTest(t *testing.T) *State {
 	return state
 }
 
+func createTestRepositoryWithCedarPolicy(t *testing.T, cedarSource string, groups map[string][]string) (*gitinterface.Repository, *State) {
+	t.Helper()
+
+	state := createTestStateWithPolicy(t)
+
+	tempDir := t.TempDir()
+	repo := gitinterface.CreateTestGitRepository(t, tempDir, false)
+	state.repository = repo
+
+	blobID, err := repo.WriteBlob([]byte(cedarSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootMetadata, err := state.GetRootMetadata(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootMetadata.AddCedarPolicy("test-cedar", map[string]string{gitinterface.GitBlobHashName: blobID.String()}); err != nil {
+		t.Fatal(err)
+	}
+	for group, members := range groups {
+		if err := rootMetadata.AddGroup(group, members); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	signer := setupSSHKeysForSigning(t, rootKeyBytes, rootPubKeyBytes)
+	rootEnv, err := dsse.CreateEnvelope(rootMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootEnv, err = dsse.SignEnvelope(testCtx, rootEnv, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Metadata.RootEnvelope = rootEnv
+
+	if err := state.preprocess(); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Commit(repo, "Create test state with cedar", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(testCtx, repo, false); err != nil {
+		t.Fatal(err)
+	}
+
+	latestEntry, err := rsl.GetLatestEntry(rsl.NewRepositoryRSLStorerAdapter(repo))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.loadedEntry = latestEntry.(rsl.ReferenceUpdaterEntry)
+
+	return repo, state
+}
+
 func setupSSHKeysForSigning(t *testing.T, privateBytes, publicBytes []byte) *ssh.Signer {
 	t.Helper()
 
