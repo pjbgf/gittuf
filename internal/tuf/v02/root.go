@@ -1145,17 +1145,42 @@ func (r *RootMetadata) GetCedarPolicies() ([]tuf.CedarPolicy, error) {
 	return policies, nil
 }
 
-// AddGroup declares a group of principals. Implemented in a follow-up.
+// AddGroup declares a group of principals that cedar policies can refer to.
+// Member IDs are not validated here: principals may be declared in rule files
+// rather than the root metadata, so membership is resolved against all
+// declared principals at verification time (unknown IDs are inert).
 func (r *RootMetadata) AddGroup(groupName string, principalIDs []string) error {
-	return tuf.ErrInvalidOperationForMetadataVersion
+	if r.Groups == nil {
+		r.Groups = map[string][]string{}
+	}
+
+	if _, exists := r.Groups[groupName]; exists {
+		return tuf.ErrGroupAlreadyExists
+	}
+
+	r.Groups[groupName] = principalIDs
+	return nil
 }
 
+// RemoveGroup removes the group identified by groupName.
 func (r *RootMetadata) RemoveGroup(groupName string) error {
-	return tuf.ErrInvalidOperationForMetadataVersion
+	if len(r.Groups) == 0 {
+		return tuf.ErrNoGroupsDefined
+	}
+	if _, exists := r.Groups[groupName]; !exists {
+		return tuf.ErrGroupNotFound
+	}
+
+	delete(r.Groups, groupName)
+	return nil
 }
 
+// GetGroups returns the groups declared in the metadata.
 func (r *RootMetadata) GetGroups() (map[string][]string, error) {
-	return nil, tuf.ErrNoGroupsDefined
+	if len(r.Groups) == 0 {
+		return nil, tuf.ErrNoGroupsDefined
+	}
+	return r.Groups, nil
 }
 
 type GitHubApp = tufv01.GitHubApp
