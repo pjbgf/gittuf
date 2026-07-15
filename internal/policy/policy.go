@@ -64,6 +64,9 @@ type State struct {
 
 	Hooks map[tuf.HookStage][]tuf.Hook
 
+	CedarPolicies []tuf.CedarPolicy
+	Groups        map[string][]string
+
 	GitHubApps map[string]tuf.GitHubApp
 
 	repository     gitstore.Storer
@@ -742,6 +745,11 @@ func (s *State) Commit(repo gitstore.Storer, commitMessage string, createRSLEntr
 		}
 	}
 
+	for _, cedarPolicy := range s.CedarPolicies {
+		cedarPath := fmt.Sprintf("%s/%s", tuf.CedarPrefix, cedarPolicy.ID())
+		blobs[cedarPath] = cedarPolicy.GetBlobID()
+	}
+
 	policyRootTreeID, err := repo.WriteTree(blobs, subtrees)
 	if err != nil {
 		return err
@@ -1151,6 +1159,22 @@ func (s *State) preprocess() error {
 	}
 
 	s.Hooks[tuf.HookStagePrePush] = append(s.Hooks[tuf.HookStagePrePush], hooks...)
+
+	cedarPolicies, err := rootMetadata.GetCedarPolicies()
+	if err != nil {
+		if !errors.Is(err, tuf.ErrNoCedarPoliciesDefined) {
+			return err
+		}
+	}
+	s.CedarPolicies = cedarPolicies
+
+	groups, err := rootMetadata.GetGroups()
+	if err != nil {
+		if !errors.Is(err, tuf.ErrNoGroupsDefined) {
+			return err
+		}
+	}
+	s.Groups = groups
 
 	globalRules := rootMetadata.GetGlobalRules()
 	if len(globalRules) > 0 {

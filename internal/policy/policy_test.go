@@ -1745,3 +1745,66 @@ func setupControllerAndNetworkRepositories(t *testing.T, controllerRepositoryLoc
 
 	return controllerRepository, networkRepository, signer
 }
+
+func TestStateCedarPolicies(t *testing.T) {
+	t.Parallel()
+
+	state := createTestStateWithPolicy(t)
+
+	tempDir := t.TempDir()
+	repo := gitinterface.CreateTestGitRepository(t, tempDir, false)
+	state.repository = repo
+
+	blobID, err := repo.WriteBlob([]byte(`forbid (principal, action, resource);`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootMetadata, err := state.GetRootMetadata(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootMetadata.AddCedarPolicy("no-tags", map[string]string{gitinterface.GitBlobHashName: blobID.String()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rootMetadata.AddGroup("release-team", []string{"alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	signer := setupSSHKeysForSigning(t, rootKeyBytes, rootPubKeyBytes)
+	rootEnv, err := dsse.CreateEnvelope(rootMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootEnv, err = dsse.SignEnvelope(testCtx, rootEnv, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Metadata.RootEnvelope = rootEnv
+
+	if err := state.preprocess(); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Len(t, state.CedarPolicies, 1)
+	assert.Equal(t, "no-tags", state.CedarPolicies[0].ID())
+	assert.Equal(t, []string{"alice"}, state.Groups["release-team"])
+
+	if err := state.Commit(repo, "Add cedar policy", false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	stagingTip, err := repo.GetReference(PolicyStagingRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeID, err := repo.GetCommitTreeID(stagingTip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := repo.GetAllFilesInTree(treeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, blobID.String(), files["cedar/no-tags"].String())
+}
