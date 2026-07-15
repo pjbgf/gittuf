@@ -4,9 +4,11 @@
 package trust
 
 import (
+	"github.com/gittuf/gittuf/internal/cmd/trust/addcedarpolicy"
 	"github.com/gittuf/gittuf/internal/cmd/trust/addcontrollerrepository"
 	"github.com/gittuf/gittuf/internal/cmd/trust/addgithubapp"
 	"github.com/gittuf/gittuf/internal/cmd/trust/addglobalrule"
+	"github.com/gittuf/gittuf/internal/cmd/trust/addgroup"
 	"github.com/gittuf/gittuf/internal/cmd/trust/addhook"
 	"github.com/gittuf/gittuf/internal/cmd/trust/addnetworkrepository"
 	"github.com/gittuf/gittuf/internal/cmd/trust/addpolicykey"
@@ -17,13 +19,16 @@ import (
 	"github.com/gittuf/gittuf/internal/cmd/trust/incrementversion"
 	i "github.com/gittuf/gittuf/internal/cmd/trust/init"
 	"github.com/gittuf/gittuf/internal/cmd/trust/inspectroot"
+	"github.com/gittuf/gittuf/internal/cmd/trust/listcedarpolicies"
 	"github.com/gittuf/gittuf/internal/cmd/trust/listglobalrules"
 	"github.com/gittuf/gittuf/internal/cmd/trust/listhooks"
 	"github.com/gittuf/gittuf/internal/cmd/trust/listpropagationdirectives"
 	"github.com/gittuf/gittuf/internal/cmd/trust/makecontroller"
 	"github.com/gittuf/gittuf/internal/cmd/trust/persistent"
+	"github.com/gittuf/gittuf/internal/cmd/trust/removecedarpolicy"
 	"github.com/gittuf/gittuf/internal/cmd/trust/removegithubapp"
 	"github.com/gittuf/gittuf/internal/cmd/trust/removeglobalrule"
+	"github.com/gittuf/gittuf/internal/cmd/trust/removegroup"
 	"github.com/gittuf/gittuf/internal/cmd/trust/removehook"
 	"github.com/gittuf/gittuf/internal/cmd/trust/removepolicykey"
 	"github.com/gittuf/gittuf/internal/cmd/trust/removepropagationdirective"
@@ -52,9 +57,11 @@ func New() *cobra.Command {
 	o.AddPersistentFlags(cmd)
 
 	cmd.AddCommand(i.New(o))
+	cmd.AddCommand(addcedarpolicy.New(o))
 	cmd.AddCommand(addcontrollerrepository.New(o))
 	cmd.AddCommand(addgithubapp.New(o))
 	cmd.AddCommand(addglobalrule.New(o))
+	cmd.AddCommand(addgroup.New(o))
 	cmd.AddCommand(addhook.New(o))
 	cmd.AddCommand(addnetworkrepository.New(o))
 	cmd.AddCommand(addpolicykey.New(o))
@@ -65,13 +72,16 @@ func New() *cobra.Command {
 	cmd.AddCommand(enablegithubappapprovals.New(o))
 	cmd.AddCommand(incrementversion.New(o))
 	cmd.AddCommand(inspectroot.New())
+	cmd.AddCommand(listcedarpolicies.New())
 	cmd.AddCommand(listglobalrules.New())
 	cmd.AddCommand(listhooks.New())
 	cmd.AddCommand(listpropagationdirectives.New())
 	cmd.AddCommand(makecontroller.New(o))
 	cmd.AddCommand(remote.New())
+	cmd.AddCommand(removecedarpolicy.New(o))
 	cmd.AddCommand(removegithubapp.New(o))
 	cmd.AddCommand(removeglobalrule.New(o))
+	cmd.AddCommand(removegroup.New(o))
 	cmd.AddCommand(removehook.New(o))
 	cmd.AddCommand(removepolicykey.New(o))
 	cmd.AddCommand(removepropagationdirective.New(o))
