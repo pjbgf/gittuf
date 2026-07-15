@@ -10,6 +10,7 @@ import (
 	"github.com/gittuf/gittuf/internal/policy"
 	policyopts "github.com/gittuf/gittuf/internal/policy/options/policy"
 	"github.com/gittuf/gittuf/internal/tuf"
+	"github.com/gittuf/gittuf/pkg/gitinterface"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -128,5 +129,120 @@ func TestAddAndRemoveGroup(t *testing.T) {
 
 		err = r.RemoveGroup(testCtx, rootSigner, "other-team", false)
 		assert.ErrorIs(t, err, tuf.ErrGroupNotFound)
+	})
+}
+
+func TestEvaluateCedarVetoesNoPolicy(t *testing.T) {
+	t.Setenv(dev.DevModeKey, "1")
+
+	// A completely fresh git repository has no RSL entries and therefore no
+	// applied policy. EvaluateCedarVetoes must return (nil, nil).
+	tmpDir := t.TempDir()
+	repoR := gitinterface.CreateTestGitRepository(t, tmpDir, false)
+	r := &Repository{r: repoR}
+
+	violations, err := r.EvaluateCedarVetoes(testCtx, []ProposedRefUpdate{
+		{RefName: "refs/tags/v1.0.0", Action: CedarActionCreate, PrincipalID: "SHA256:unknown"},
+	})
+	assert.Nil(t, err)
+	assert.Empty(t, violations)
+}
+
+func TestEvaluateCedarVetoesInvalidAction(t *testing.T) {
+	t.Parallel()
+
+	// An action value with wrong casing ("Create" instead of "create") must be
+	// rejected before any state is loaded, not silently pass through as a
+	// non-matching action that bypasses forbids.
+	tmpDir := t.TempDir()
+	repoR := gitinterface.CreateTestGitRepository(t, tmpDir, false)
+	r := &Repository{r: repoR}
+
+	_, err := r.EvaluateCedarVetoes(testCtx, []ProposedRefUpdate{
+		{RefName: "refs/tags/v1.0.0", Action: "Create", PrincipalID: "SHA256:unknown"},
+	})
+	assert.Error(t, err)
+}
+
+func TestEvaluateCedarVetoes(t *testing.T) {
+	t.Setenv(dev.DevModeKey, "1")
+
+	rootSigner := setupSSHKeysForSigning(t, rootKeyBytes, rootPubKeyBytes)
+
+	t.Run("single forbid policy vetoes matching update only", func(t *testing.T) {
+		r := createTestRepositoryWithRoot(t, "")
+
+		err := r.AddCedarPolicy(testCtx, rootSigner, "no-tags", []byte(testCedarPolicy), false)
+		require.Nil(t, err)
+
+		// Record RSL entry for the staging ref so Apply can reconcile it, then
+		// promote staging → applied policy.
+		require.Nil(t, r.StagePolicy(testCtx, "", true, false))
+		require.Nil(t, policy.Apply(testCtx, r.r, false))
+
+		violations, err := r.EvaluateCedarVetoes(testCtx, []ProposedRefUpdate{
+			{RefName: "refs/tags/v1.0.0", Action: CedarActionCreate, PrincipalID: "SHA256:unknown"},
+			{RefName: "refs/heads/main", Action: CedarActionUpdate, PrincipalID: "SHA256:unknown"},
+		})
+		assert.Nil(t, err)
+		require.Len(t, violations, 1)
+		assert.Equal(t, "refs/tags/v1.0.0", violations[0].RefName)
+		assert.Equal(t, "create", violations[0].Action)
+		assert.Equal(t, []string{"no-tags/policy0"}, violations[0].PolicyIDs)
+	})
+
+	t.Run("no cedar policies means no violations", func(t *testing.T) {
+		// createTestRepositoryWithRoot already applies the policy, but it
+		// carries no cedar policies.
+		r := createTestRepositoryWithRoot(t, "")
+
+		violations, err := r.EvaluateCedarVetoes(testCtx, []ProposedRefUpdate{
+			{RefName: "refs/tags/v1.0.0", Action: CedarActionCreate, PrincipalID: "SHA256:unknown"},
+		})
+		assert.Nil(t, err)
+		assert.Empty(t, violations)
+	})
+}
+
+func TestEvaluateCedarVetoesGroupCarveOut(t *testing.T) {
+	t.Setenv(dev.DevModeKey, "1")
+
+	const groupCarveOutPolicy = `forbid (
+  principal,
+  action == Gittuf::Action::"create",
+  resource is Gittuf::GitRef
+) when { resource.path like "refs/tags/*" }
+unless { principal in Gittuf::Group::"release-team" };`
+
+	rootSigner := setupSSHKeysForSigning(t, rootKeyBytes, rootPubKeyBytes)
+	r := createTestRepositoryWithRoot(t, "")
+
+	err := r.AddGroup(testCtx, rootSigner, "release-team", []string{"SHA256:releaser"}, false)
+	require.Nil(t, err)
+
+	err = r.AddCedarPolicy(testCtx, rootSigner, "no-tags-except-release-team", []byte(groupCarveOutPolicy), false)
+	require.Nil(t, err)
+
+	// Record RSL entry for the staging ref so Apply can reconcile it, then
+	// promote staging → applied policy.
+	require.Nil(t, r.StagePolicy(testCtx, "", true, false))
+	require.Nil(t, policy.Apply(testCtx, r.r, false))
+
+	t.Run("group member is not vetoed", func(t *testing.T) {
+		violations, err := r.EvaluateCedarVetoes(testCtx, []ProposedRefUpdate{
+			{RefName: "refs/tags/v1.0.0", Action: CedarActionCreate, PrincipalID: "SHA256:releaser"},
+		})
+		assert.Nil(t, err)
+		assert.Empty(t, violations)
+	})
+
+	t.Run("non-member is vetoed", func(t *testing.T) {
+		violations, err := r.EvaluateCedarVetoes(testCtx, []ProposedRefUpdate{
+			{RefName: "refs/tags/v1.0.0", Action: CedarActionCreate, PrincipalID: "SHA256:unknown"},
+		})
+		assert.Nil(t, err)
+		require.Len(t, violations, 1)
+		assert.Equal(t, "refs/tags/v1.0.0", violations[0].RefName)
+		assert.Equal(t, []string{"no-tags-except-release-team/policy0"}, violations[0].PolicyIDs)
 	})
 }

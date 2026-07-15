@@ -20,9 +20,18 @@ import (
 	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	"github.com/gittuf/gittuf/internal/tuf"
 	"github.com/gittuf/gittuf/pkg/gitinterface"
+	"github.com/gittuf/gittuf/pkg/rsl"
 )
 
 var ErrNoCedarPolicyName = errors.New("no cedar policy name provided")
+
+// Cedar actions for ProposedRefUpdate. These are the only values
+// EvaluateCedarVetoes accepts.
+const (
+	CedarActionCreate = cedar.ActionCreate
+	CedarActionUpdate = cedar.ActionUpdate
+	CedarActionDelete = cedar.ActionDelete
+)
 
 // AddCedarPolicy validates policyBytes as Cedar policy syntax, writes it as a
 // blob and declares it in the root of trust metadata. The policy is enforced
@@ -252,4 +261,97 @@ func (r *Repository) RemoveGroup(ctx context.Context, signer sslibdsse.SignerVer
 
 	commitMessage := fmt.Sprintf("Remove group '%s' from root metadata", groupName)
 	return r.updateRootMetadata(ctx, state, signer, rootMetadata, commitMessage, options.CreateRSLEntry, signCommit)
+}
+
+// ProposedRefUpdate describes a reference update that has not happened yet,
+// for pre-apply Cedar evaluation (e.g. by a server deciding whether to accept
+// a push).
+type ProposedRefUpdate struct {
+	RefName     string
+	Action      string // must be one of CedarActionCreate, CedarActionUpdate, or CedarActionDelete
+	PrincipalID string
+}
+
+// CedarViolation reports a proposed update that a forbid policy matched.
+type CedarViolation struct {
+	RefName   string
+	Action    string
+	PolicyIDs []string
+}
+
+// EvaluateCedarVetoes evaluates the Cedar policies declared in the currently
+// applied policy against proposed reference updates. It returns one violation
+// per vetoed update; no declared policies (or no applied policy at all) means
+// no violations. Unlike the management APIs this is a verification path and
+// is not gated on dev mode. Violations are returned in the same order as the
+// corresponding updates.
+func (r *Repository) EvaluateCedarVetoes(ctx context.Context, updates []ProposedRefUpdate) ([]CedarViolation, error) {
+	for _, update := range updates {
+		switch update.Action {
+		case CedarActionCreate, CedarActionUpdate, CedarActionDelete:
+		default:
+			return nil, fmt.Errorf("invalid cedar action %q for ref %q", update.Action, update.RefName)
+		}
+	}
+
+	state, err := policy.LoadCurrentState(ctx, r.r, policy.PolicyRef)
+	if err != nil {
+		if errors.Is(err, rsl.ErrRSLEntryNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	if len(state.CedarPolicies) == 0 {
+		return nil, nil
+	}
+
+	policySet := cedar.NewPolicySet()
+	for _, cp := range state.CedarPolicies {
+		contents, err := r.r.ReadBlob(cp.GetBlobID())
+		if err != nil {
+			return nil, fmt.Errorf("reading cedar policy '%s': %w", cp.ID(), err)
+		}
+		if err := policySet.AddPolicies(cp.ID(), contents); err != nil {
+			return nil, fmt.Errorf("adding cedar policy '%s': %w", cp.ID(), err)
+		}
+	}
+
+	// Collect all principal IDs: those declared in the policy plus every
+	// principal referenced in the proposed updates.
+	principalSet := make(map[string]struct{})
+	for id := range state.GetAllPrincipals() {
+		principalSet[id] = struct{}{}
+	}
+	for _, u := range updates {
+		if u.PrincipalID != "" {
+			principalSet[u.PrincipalID] = struct{}{}
+		}
+	}
+	principalIDs := make([]string, 0, len(principalSet))
+	for id := range principalSet {
+		principalIDs = append(principalIDs, id)
+	}
+
+	// Build all operations first and construct the entity graph once; the
+	// group+principal graph is identical across updates and BuildEntities
+	// populates resource entities for every op.
+	allOps := make([]cedar.Operation, len(updates))
+	for i, update := range updates {
+		allOps[i] = cedar.Operation{Action: update.Action, ResourcePath: update.RefName}
+	}
+	entities := cedar.BuildEntities(principalIDs, state.Groups, allOps)
+
+	var violations []CedarViolation
+	for i, update := range updates {
+		for _, v := range policySet.Veto(update.PrincipalID, entities, []cedar.Operation{allOps[i]}) {
+			violations = append(violations, CedarViolation{
+				RefName:   update.RefName,
+				Action:    update.Action,
+				PolicyIDs: v.PolicyIDs,
+			})
+		}
+	}
+
+	return violations, nil
 }
