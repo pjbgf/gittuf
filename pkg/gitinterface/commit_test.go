@@ -430,9 +430,7 @@ func TestVerifyCommitSignatureRejectsMultipleSignatures(t *testing.T) {
 				TreeHash:  plumbing.ZeroHash,
 			}
 
-			commitEncoded := goGitRepo.Storer.NewEncodedObject()
-			require.Nil(t, testCommit.EncodeWithoutSignature(commitEncoded))
-			reader, err := commitEncoded.Reader()
+			reader, err := testCommit.EncodeWithoutSignature()
 			require.Nil(t, err)
 			contents, err := io.ReadAll(reader)
 			require.Nil(t, err)
@@ -444,9 +442,9 @@ func TestVerifyCommitSignatureRejectsMultipleSignatures(t *testing.T) {
 			// lines, must be rejected as ambiguous rather than verified
 			// against the first.
 			block := strings.TrimRight(sig, "\n") + "\n"
-			testCommit.Signature = block + block
+			testCommit.Signature = []byte(block + block)
 
-			commitEncoded = goGitRepo.Storer.NewEncodedObject()
+			commitEncoded := goGitRepo.Storer.NewEncodedObject()
 			require.Nil(t, testCommit.Encode(commitEncoded))
 			commitID, err := goGitRepo.Storer.SetEncodedObject(commitEncoded)
 			require.Nil(t, err)
@@ -556,11 +554,7 @@ func createTestGPGSignedCommit(t *testing.T, repo *Repository) Hash {
 		TreeHash: plumbing.ZeroHash,
 	}
 
-	commitEncoded := goGitRepo.Storer.NewEncodedObject()
-	if err := testCommit.EncodeWithoutSignature(commitEncoded); err != nil {
-		t.Fatal(err)
-	}
-	r, err := commitEncoded.Reader()
+	r, err := testCommit.EncodeWithoutSignature()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -574,10 +568,10 @@ func createTestGPGSignedCommit(t *testing.T, repo *Repository) Hash {
 	if err := openpgp.ArmoredDetachSign(sig, keyring[0], r, nil); err != nil {
 		t.Fatal(err)
 	}
-	testCommit.Signature = sig.String()
+	testCommit.Signature = []byte(sig.String())
 
 	// Re-encode with the signature
-	commitEncoded = goGitRepo.Storer.NewEncodedObject()
+	commitEncoded := goGitRepo.Storer.NewEncodedObject()
 	if err := testCommit.Encode(commitEncoded); err != nil {
 		t.Fatal(err)
 	}
@@ -614,7 +608,7 @@ func createTestSigstoreSignedCommit(t *testing.T, repo *Repository) Hash {
 			Email: "aditya@saky.in",
 			When:  time.Date(2023, time.August, 1, 15, 44, 23, 0, time.FixedZone("", -4*3600)),
 		},
-		Signature: `-----BEGIN SIGNED MESSAGE-----
+		Signature: []byte(`-----BEGIN SIGNED MESSAGE-----
 MIIEMAYJKoZIhvcNAQcCoIIEITCCBB0CAQExDTALBglghkgBZQMEAgEwCwYJKoZI
 hvcNAQcBoIIC0DCCAswwggJToAMCAQICFHIJCrBVHxoHlGos++k1xJxcElGaMAoG
 CCqGSM49BAMDMDcxFTATBgNVBAoTDHNpZ3N0b3JlLmRldjEeMBwGA1UEAxMVc2ln
@@ -639,13 +633,13 @@ VHcVlkO8jRm/fbUipwxwxNaI7UFDAL38Jl8eUj/5MAoGCCqGSM49BAMCBEgwRgIh
 AIYiRbnVeWjjgX2XwljDryzQN5RhUQaVH/AcUj+tbvWxAiEAhm9l3BU58tQsgyJW
 oYBpMWLgg6AUzpxx9mITZ2EKr4c=
 -----END SIGNED MESSAGE-----
-`,
+`),
 		Message:  "Test commit\n",
 		TreeHash: plumbing.NewHash("4b825dc642cb6eb9a060e54bf8d69288fbee4904"),
 	}
 
 	commitEncoded := goGitRepo.Storer.NewEncodedObject()
-	if err := testCommit.EncodeWithoutSignature(commitEncoded); err != nil {
+	if err := testCommit.Encode(commitEncoded); err != nil {
 		t.Fatal(err)
 	}
 

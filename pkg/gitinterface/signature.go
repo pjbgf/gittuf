@@ -84,7 +84,7 @@ func (r *Repository) GetObjectSignature(objectID Hash) ([]byte, []byte, error) {
 			return nil, nil, fmt.Errorf("unable to encode commit contents: %w", err)
 		}
 
-		return payload, []byte(signatureForObjectID(objectID, commit.Signature, commit.SignatureSHA256)), nil
+		return payload, []byte(signatureForObjectID(objectID, string(commit.Signature), string(commit.SignatureSHA256))), nil
 	}
 
 	if err := r.ensureIsTag(objectID); err == nil {

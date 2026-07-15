@@ -13,7 +13,6 @@ import (
 
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
-	"github.com/go-git/go-git/v6/storage/memory"
 )
 
 // Commit creates a new commit in the repo and sets targetRef's to the commit.
@@ -101,9 +100,9 @@ func (r *Repository) CommitUsingSpecificKey(treeID Hash, targetRef, message stri
 	// header (go-git's SignatureSHA256), matching Git's own behavior, so it
 	// can be read back during verification.
 	if r.GetObjectFormat() == ObjectFormatSHA256 {
-		commit.SignatureSHA256 = signature
+		commit.SignatureSHA256 = []byte(signature)
 	} else {
-		commit.Signature = signature
+		commit.Signature = []byte(signature)
 	}
 
 	goGitRepo, err := r.GetGoGitRepository()
@@ -279,14 +278,9 @@ func (r *Repository) ensureIsCommit(commitID Hash) error {
 }
 
 func getCommitBytesWithoutSignature(commit *object.Commit) ([]byte, error) {
-	commitEncoded := memory.NewStorage().NewEncodedObject()
-	if err := commit.EncodeWithoutSignature(commitEncoded); err != nil {
-		return nil, err
-	}
-	r, err := commitEncoded.Reader()
+	r, err := commit.EncodeWithoutSignature()
 	if err != nil {
 		return nil, err
 	}
-
 	return io.ReadAll(r)
 }

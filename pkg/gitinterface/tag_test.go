@@ -180,7 +180,7 @@ func TestVerifyTagSignatureRejectsMultipleSignatures(t *testing.T) {
 			// Two (individually valid) signature blocks, each on their own
 			// lines, must not verify against either block.
 			block := strings.TrimRight(sig, "\n") + "\n"
-			tag.Signature = block + block
+			tag.Signature = []byte(block + block)
 
 			tagEncoded := goGitRepo.Storer.NewEncodedObject()
 			require.Nil(t, tag.Encode(tagEncoded))

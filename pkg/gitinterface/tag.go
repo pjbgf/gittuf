@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-git/go-git/v6/plumbing"
 	"github.com/go-git/go-git/v6/plumbing/object"
-	"github.com/go-git/go-git/v6/storage/memory"
 )
 
 var ErrTagAlreadyExists = errors.New("tag already exists")
@@ -63,7 +62,7 @@ func (r *Repository) TagUsingSpecificKey(target Hash, name, message string, sign
 	// Git appends tag signatures to the tag payload regardless of the object
 	// format; only commits store the signature under a header named for the
 	// hash algorithm (`gpgsig` / `gpgsig-sha256`).
-	tag.Signature = signature
+	tag.Signature = []byte(signature)
 
 	obj := goGitRepo.Storer.NewEncodedObject()
 	if err := tag.Encode(obj); err != nil {
@@ -109,14 +108,9 @@ func (r *Repository) ensureIsTag(tagID Hash) error {
 }
 
 func getTagBytesWithoutSignature(tag *object.Tag) ([]byte, error) {
-	tagEncoded := memory.NewStorage().NewEncodedObject()
-	if err := tag.EncodeWithoutSignature(tagEncoded); err != nil {
-		return nil, err
-	}
-	r, err := tagEncoded.Reader()
+	r, err := tag.EncodeWithoutSignature()
 	if err != nil {
 		return nil, err
 	}
-
 	return io.ReadAll(r)
 }
