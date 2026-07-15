@@ -27,6 +27,8 @@ require (
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af
 )
 
+require github.com/cedar-policy/cedar-go v1.8.0 // indirect
+
 require (
 	al.essio.dev/pkg/shellescape v1.6.0 // indirect
 	cloud.google.com/go v0.123.0 // indirect
