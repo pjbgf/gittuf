@@ -40,7 +40,7 @@ var (
 //
 // Update: This helper just wraps around CommitUsingSpecificKey in the rsl
 // package. We can probably get rid of it, but it's a pretty big delta.
-func CreateTestRSLReferenceEntryCommit(t *testing.T, repo *gitinterface.Repository, entry *rsl.ReferenceEntry, signingKeyBytes []byte) gitinterface.Hash {
+func CreateTestRSLReferenceEntryCommit(t testing.TB, repo *gitinterface.Repository, entry *rsl.ReferenceEntry, signingKeyBytes []byte) gitinterface.Hash {
 	t.Helper()
 
 	if err := entry.CommitUsingSpecificKey(repo, signingKeyBytes); err != nil {
@@ -62,7 +62,7 @@ func CreateTestRSLReferenceEntryCommit(t *testing.T, repo *gitinterface.Reposito
 //
 // Update: This helper just wraps around CommitUsingSpecificKey in the rsl
 // package. We can probably get rid of it, but it's a pretty big delta.
-func CreateTestRSLAnnotationEntryCommit(t *testing.T, repo *gitinterface.Repository, annotation *rsl.AnnotationEntry, signingKeyBytes []byte) gitinterface.Hash {
+func CreateTestRSLAnnotationEntryCommit(t testing.TB, repo *gitinterface.Repository, annotation *rsl.AnnotationEntry, signingKeyBytes []byte) gitinterface.Hash {
 	t.Helper()
 
 	if err := annotation.CommitUsingSpecificKey(repo, signingKeyBytes); err != nil {
@@ -83,7 +83,7 @@ func CreateTestRSLAnnotationEntryCommit(t *testing.T, repo *gitinterface.Reposit
 // first commit contains a tree with one object (an empty blob), the second with
 // two objects (both empty blobs), and so on. Each commit is signed using the
 // specified key.
-func AddNTestCommitsToSpecifiedRef(t *testing.T, repo *gitinterface.Repository, refName string, n int, signingKeyBytes []byte) []gitinterface.Hash {
+func AddNTestCommitsToSpecifiedRef(t testing.TB, repo *gitinterface.Repository, refName string, n int, signingKeyBytes []byte) []gitinterface.Hash {
 	t.Helper()
 
 	emptyBlobHash, err := repo.WriteBlob(nil)
@@ -124,7 +124,7 @@ func AddNTestCommitsToSpecifiedRef(t *testing.T, repo *gitinterface.Repository, 
 
 // CreateTestSignedTag creates a signed tag in the repository pointing to the
 // target object. The tag is signed using the specified key.
-func CreateTestSignedTag(t *testing.T, repo *gitinterface.Repository, tagName string, target gitinterface.Hash, signingKeyBytes []byte) gitinterface.Hash {
+func CreateTestSignedTag(t testing.TB, repo *gitinterface.Repository, tagName string, target gitinterface.Hash, signingKeyBytes []byte) gitinterface.Hash {
 	t.Helper()
 
 	tagMessage := fmt.Sprintf("%s\n", tagName)

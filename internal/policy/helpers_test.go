@@ -60,6 +60,29 @@ func createTestRepository(t *testing.T, stateCreator func(*testing.T) *State, op
 	return repo, state
 }
 
+func createTestRepositoryFromState(tb testing.TB, state *State) (*gitinterface.Repository, *State) {
+	tb.Helper()
+
+	tempDir := tb.TempDir()
+	repo := gitinterface.CreateTestGitRepository(tb, tempDir, false)
+	state.repository = repo
+
+	if err := state.Commit(repo, "Create test state", true, false); err != nil {
+		tb.Fatal(err)
+	}
+	if err := Apply(testCtx, repo, false); err != nil {
+		tb.Fatal(err)
+	}
+
+	latestEntry, err := rsl.GetLatestEntry(rsl.NewRepositoryRSLStorerAdapter(repo))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	state.loadedEntry = latestEntry.(rsl.ReferenceUpdaterEntry)
+
+	return repo, state
+}
+
 func createControllerAndNetworkRepositories(t *testing.T) (*gitinterface.Repository, *gitinterface.Repository) {
 	t.Helper()
 
@@ -1151,7 +1174,7 @@ func createTestRepositoryWithCedarPolicy(t *testing.T, cedarSource string, group
 	return repo, state
 }
 
-func setupSSHKeysForSigning(t *testing.T, privateBytes, publicBytes []byte) *ssh.Signer {
+func setupSSHKeysForSigning(t testing.TB, privateBytes, publicBytes []byte) *ssh.Signer {
 	t.Helper()
 
 	keysDir := t.TempDir()

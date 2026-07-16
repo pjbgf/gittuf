@@ -58,7 +58,7 @@ func WithSHA256Format() TestRepositoryOption {
 // using the SHA-1 object format unless overridden via options. This is meant
 // to be used by tests across gittuf packages. This helper also sets up an
 // SSH RSA signing key that can be used to create reproducible commits.
-func CreateTestGitRepository(t *testing.T, dir string, bare bool, opts ...TestRepositoryOption) *Repository {
+func CreateTestGitRepository(t testing.TB, dir string, bare bool, opts ...TestRepositoryOption) *Repository {
 	t.Helper()
 
 	repo, err := createTestGitRepository(dir, t.TempDir(), bare, opts...)
@@ -102,7 +102,7 @@ func createTestGitRepository(dir, signingKeysDir string, bare bool, opts ...Test
 	return repo, nil
 }
 
-func setupRepository(t *testing.T, dir string, bare bool, objectFormat ObjectFormat) *Repository {
+func setupRepository(t testing.TB, dir string, bare bool, objectFormat ObjectFormat) *Repository {
 	t.Helper()
 
 	repo, err := newTestRepository(dir, bare, objectFormat)
