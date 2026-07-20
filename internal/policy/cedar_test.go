@@ -267,3 +267,22 @@ func TestCedarOperationsForEntry(t *testing.T) {
 		assert.Equal(t, cedar.Operation{Action: cedar.ActionDelete, ResourcePath: refName}, ops[0])
 	})
 }
+
+func TestCedarPolicySetMemoized(t *testing.T) {
+	t.Parallel()
+
+	repo, state := createTestRepositoryWithCedarPolicy(t, forbidNothing, nil)
+
+	first, err := state.CedarPolicySet(repo)
+	assert.Nil(t, err)
+	second, err := state.CedarPolicySet(repo)
+	assert.Nil(t, err)
+	assert.Same(t, first, second)
+
+	if err := state.preprocess(); err != nil {
+		t.Fatal(err)
+	}
+	third, err := state.CedarPolicySet(repo)
+	assert.Nil(t, err)
+	assert.NotSame(t, first, third)
+}

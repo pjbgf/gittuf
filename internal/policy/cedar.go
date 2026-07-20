@@ -33,15 +33,9 @@ func applyCedarVeto(ctx context.Context, repo *gitinterface.Repository, policy *
 		return nil
 	}
 
-	policySet := cedar.NewPolicySet()
-	for _, cedarPolicy := range policy.CedarPolicies {
-		contents, err := repo.ReadBlob(cedarPolicy.GetBlobID())
-		if err != nil {
-			return fmt.Errorf("unable to read cedar policy '%s': %w", cedarPolicy.ID(), err)
-		}
-		if err := policySet.AddPolicies(cedarPolicy.ID(), contents); err != nil {
-			return fmt.Errorf("unable to parse cedar policy '%s': %w", cedarPolicy.ID(), err)
-		}
+	policySet, err := policy.CedarPolicySet(repo)
+	if err != nil {
+		return err
 	}
 
 	ops, err := cedarOperationsForEntry(repo, entry)
@@ -68,6 +62,31 @@ func applyCedarVeto(ctx context.Context, repo *gitinterface.Repository, policy *
 	}
 
 	return nil
+}
+
+// CedarPolicySet returns the parsed Cedar policies declared in the state,
+// reading and parsing the policy blobs on first use and memoizing the result:
+// the declared policies are immutable for a given state, and verification
+// walks apply the same state to many RSL entries. preprocess resets the memo
+// whenever the declared policies change.
+func (s *State) CedarPolicySet(repo *gitinterface.Repository) (*cedar.PolicySet, error) {
+	if s.cedarPolicySet != nil {
+		return s.cedarPolicySet, nil
+	}
+
+	policySet := cedar.NewPolicySet()
+	for _, cedarPolicy := range s.CedarPolicies {
+		contents, err := repo.ReadBlob(cedarPolicy.GetBlobID())
+		if err != nil {
+			return nil, fmt.Errorf("unable to read cedar policy '%s': %w", cedarPolicy.ID(), err)
+		}
+		if err := policySet.AddPolicies(cedarPolicy.ID(), contents); err != nil {
+			return nil, fmt.Errorf("unable to parse cedar policy '%s': %w", cedarPolicy.ID(), err)
+		}
+	}
+
+	s.cedarPolicySet = policySet
+	return policySet, nil
 }
 
 // resolveEntrySigners maps the RSL entry's git signature to a declared

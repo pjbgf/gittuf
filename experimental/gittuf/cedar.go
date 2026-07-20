@@ -306,15 +306,9 @@ func (r *Repository) EvaluateCedarVetoes(ctx context.Context, updates []Proposed
 		return nil, nil
 	}
 
-	policySet := cedar.NewPolicySet()
-	for _, cp := range state.CedarPolicies {
-		contents, err := r.r.ReadBlob(cp.GetBlobID())
-		if err != nil {
-			return nil, fmt.Errorf("reading cedar policy '%s': %w", cp.ID(), err)
-		}
-		if err := policySet.AddPolicies(cp.ID(), contents); err != nil {
-			return nil, fmt.Errorf("adding cedar policy '%s': %w", cp.ID(), err)
-		}
+	policySet, err := state.CedarPolicySet(r.r)
+	if err != nil {
+		return nil, err
 	}
 
 	// Collect all principal IDs: those declared in the policy plus every

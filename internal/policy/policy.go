@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gittuf/gittuf/internal/cedar"
 	"github.com/gittuf/gittuf/internal/common/set"
 	policyopts "github.com/gittuf/gittuf/internal/policy/options/policy"
 	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
@@ -76,6 +77,7 @@ type State struct {
 	allPrincipals  map[string]tuf.Principal
 	hasFileRule    bool
 	globalRules    map[string][]tuf.GlobalRule
+	cedarPolicySet *cedar.PolicySet
 }
 
 type StateMetadata struct {
@@ -1167,6 +1169,7 @@ func (s *State) preprocess() error {
 		}
 	}
 	s.CedarPolicies = cedarPolicies
+	s.cedarPolicySet = nil
 
 	groups, err := rootMetadata.GetGroups()
 	if err != nil {
