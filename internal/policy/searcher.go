@@ -164,7 +164,9 @@ func (c *cacheSearcher) FindFirstPolicyEntry() (rsl.ReferenceUpdaterEntry, error
 
 	policyEntries := c.persistentCache.GetPolicyEntries()
 	if len(policyEntries) == 0 {
-		return nil, ErrPolicyNotFound
+		// The cache has no policy entries indexed (e.g. it was created
+		// before the policy was applied); fall back to searching the RSL.
+		return c.searcher.FindFirstPolicyEntry()
 	}
 
 	entry, err := loadRSLReferenceUpdaterEntry(c.repo, policyEntries[0].GetEntryID())
@@ -181,7 +183,9 @@ func (c *cacheSearcher) FindLatestPolicyEntry() (rsl.ReferenceUpdaterEntry, erro
 
 	policyEntries := c.persistentCache.GetPolicyEntries()
 	if len(policyEntries) == 0 {
-		return nil, ErrPolicyNotFound
+		// The cache has no policy entries indexed (e.g. it was created
+		// before the policy was applied); fall back to searching the RSL.
+		return c.searcher.FindLatestPolicyEntry()
 	}
 
 	entry, err := loadRSLReferenceUpdaterEntry(c.repo, policyEntries[len(policyEntries)-1].GetEntryID())
@@ -214,7 +218,9 @@ func (c *cacheSearcher) FindPolicyEntryFor(entry rsl.Entry) (rsl.ReferenceUpdate
 
 	policyEntryIndex := c.persistentCache.FindPolicyEntryNumberForEntry(entry.GetNumber())
 	if policyEntryIndex.GetEntryNumber() == 0 {
-		return nil, ErrPolicyNotFound
+		// The cache has no policy entry indexed at or before this entry;
+		// the cache may be incomplete, so fall back to searching the RSL.
+		return c.searcher.FindPolicyEntryFor(entry)
 	}
 
 	policyEntry, err := loadRSLReferenceUpdaterEntry(c.repo, policyEntryIndex.GetEntryID())
@@ -285,7 +291,9 @@ func (c *cacheSearcher) FindAttestationsEntryFor(entry rsl.Entry) (rsl.Reference
 
 	attestationsEntryIndex, _ := c.persistentCache.FindAttestationsEntryNumberForEntry(entry.GetNumber())
 	if attestationsEntryIndex.GetEntryNumber() == 0 {
-		return nil, attestations.ErrAttestationsNotFound
+		// The cache has no attestations entry indexed at or before this
+		// entry; the cache may be incomplete, so fall back to the RSL.
+		return c.searcher.FindAttestationsEntryFor(entry)
 	}
 
 	attestationsEntry, err := loadRSLReferenceUpdaterEntry(c.repo, attestationsEntryIndex.GetEntryID())
@@ -302,7 +310,9 @@ func (c *cacheSearcher) FindLatestAttestationsEntry() (rsl.ReferenceUpdaterEntry
 
 	attestationsEntries := c.persistentCache.GetAttestationsEntries()
 	if len(attestationsEntries) == 0 {
-		return nil, attestations.ErrAttestationsNotFound
+		// The cache has no attestations entries indexed; fall back to
+		// searching the RSL.
+		return c.searcher.FindLatestAttestationsEntry()
 	}
 
 	entry, err := loadRSLReferenceUpdaterEntry(c.repo, attestationsEntries[len(attestationsEntries)-1].GetEntryID())
