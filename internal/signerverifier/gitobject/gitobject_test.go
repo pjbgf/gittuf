@@ -165,10 +165,7 @@ func createGPGSignedCommit(t *testing.T, repo *gitinterface.Repository) gitinter
 		TreeHash: plumbing.ZeroHash,
 	}
 
-	commitEncoded := goGitRepo.Storer.NewEncodedObject()
-	require.Nil(t, testCommit.EncodeWithoutSignature(commitEncoded))
-
-	r, err := commitEncoded.Reader()
+	r, err := testCommit.EncodeWithoutSignature()
 	require.Nil(t, err)
 
 	keyring, err := openpgp.ReadArmoredKeyRing(bytes.NewReader(artifacts.GPGKey1Private))
@@ -176,9 +173,9 @@ func createGPGSignedCommit(t *testing.T, repo *gitinterface.Repository) gitinter
 
 	sig := new(strings.Builder)
 	require.Nil(t, openpgp.ArmoredDetachSign(sig, keyring[0], r, nil))
-	testCommit.Signature = sig.String()
+	testCommit.Signature = []byte(sig.String())
 
-	commitEncoded = goGitRepo.Storer.NewEncodedObject()
+	commitEncoded := goGitRepo.Storer.NewEncodedObject()
 	require.Nil(t, testCommit.Encode(commitEncoded))
 
 	commitID, err := goGitRepo.Storer.SetEncodedObject(commitEncoded)

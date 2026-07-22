@@ -143,7 +143,7 @@ func createBenchRepositoryWithCedarPolicies(b *testing.B, n, refs int) (*gitinte
 		b.Fatal(err)
 	}
 
-	latestEntry, err := rsl.GetLatestEntry(rsl.NewRepositoryRSLStorerAdapter(repo))
+	latestEntry, err := rsl.GetLatestEntry(repo)
 	if err != nil {
 		b.Fatal(err)
 	}

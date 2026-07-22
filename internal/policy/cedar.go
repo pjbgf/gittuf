@@ -13,6 +13,7 @@ import (
 	"github.com/gittuf/gittuf/internal/cedar"
 	"github.com/gittuf/gittuf/internal/tuf"
 	"github.com/gittuf/gittuf/pkg/gitinterface"
+	"github.com/gittuf/gittuf/pkg/gitstore"
 	"github.com/gittuf/gittuf/pkg/rsl"
 )
 
@@ -28,7 +29,7 @@ const unknownCedarPrincipalID = "gittuf-cedar-unknown-principal"
 // over the entry's change context. Existing gittuf verification remains
 // authoritative: the entry is rejected only when an explicit forbid matches
 // (veto semantics), so permit statements have no effect.
-func applyCedarVeto(ctx context.Context, repo *gitinterface.Repository, policy *State, entry *rsl.ReferenceEntry) error {
+func applyCedarVeto(ctx context.Context, repo gitstore.Storer, policy *State, entry *rsl.ReferenceEntry) error {
 	if len(policy.CedarPolicies) == 0 {
 		return nil
 	}
@@ -69,7 +70,7 @@ func applyCedarVeto(ctx context.Context, repo *gitinterface.Repository, policy *
 // the declared policies are immutable for a given state, and verification
 // walks apply the same state to many RSL entries. preprocess resets the memo
 // whenever the declared policies change.
-func (s *State) CedarPolicySet(repo *gitinterface.Repository) (*cedar.PolicySet, error) {
+func (s *State) CedarPolicySet(repo gitstore.Storer) (*cedar.PolicySet, error) {
 	if s.cedarPolicySet != nil {
 		return s.cedarPolicySet, nil
 	}
@@ -109,7 +110,7 @@ func (s *State) resolveEntrySigners(ctx context.Context, entry *rsl.ReferenceEnt
 		verifier.principals = append(verifier.principals, principal)
 	}
 
-	principalIDs, err := verifier.Verify(ctx, gitHash(entry.ID), nil)
+	principalIDs, err := verifier.Verify(ctx, entry.ID, nil)
 	if err != nil || principalIDs == nil || principalIDs.Len() == 0 {
 		slog.Debug("RSL entry signature does not match a declared principal, using unknown cedar principal...")
 		return []string{unknownCedarPrincipalID}
@@ -122,13 +123,13 @@ func (s *State) resolveEntrySigners(ctx context.Context, entry *rsl.ReferenceEnt
 // file path changed by the commits the entry introduces. Per the v1 design,
 // file-level changes are always reported as ActionUpdate regardless of whether
 // the file is being created or deleted.
-func cedarOperationsForEntry(repo *gitinterface.Repository, entry *rsl.ReferenceEntry) ([]cedar.Operation, error) {
+func cedarOperationsForEntry(repo gitstore.Storer, entry *rsl.ReferenceEntry) ([]cedar.Operation, error) {
 	if entry.TargetID.IsZero() {
 		return []cedar.Operation{{Action: cedar.ActionDelete, ResourcePath: entry.RefName}}, nil
 	}
 
 	action := cedar.ActionUpdate
-	if _, _, err := rsl.GetLatestReferenceUpdaterEntry(rsl.NewRepositoryRSLStorerAdapter(repo), rsl.ForReference(entry.RefName), rsl.BeforeEntryID(entry.ID)); err != nil {
+	if _, _, err := rsl.GetLatestReferenceUpdaterEntry(repo, rsl.ForReference(entry.RefName), rsl.BeforeEntryID(entry.ID)); err != nil {
 		if !errors.Is(err, rsl.ErrRSLEntryNotFound) {
 			return nil, err
 		}

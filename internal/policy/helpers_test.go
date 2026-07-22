@@ -74,7 +74,7 @@ func createTestRepositoryFromState(tb testing.TB, state *State) (*gitinterface.R
 		tb.Fatal(err)
 	}
 
-	latestEntry, err := rsl.GetLatestEntry(rsl.NewRepositoryRSLStorerAdapter(repo))
+	latestEntry, err := rsl.GetLatestEntry(repo)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -1165,7 +1165,7 @@ func createTestRepositoryWithCedarPolicy(t *testing.T, cedarSource string, group
 		t.Fatal(err)
 	}
 
-	latestEntry, err := rsl.GetLatestEntry(rsl.NewRepositoryRSLStorerAdapter(repo))
+	latestEntry, err := rsl.GetLatestEntry(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
