@@ -1088,3 +1088,110 @@ func TestRemoveHook(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(rootMetadata.Hooks[tuf.HookStagePrePush]))
 }
+
+func TestAddCedarPolicy(t *testing.T) {
+	t.Parallel()
+
+	rootMetadata := initialTestRootMetadata(t)
+
+	hashes := map[string]string{gitinterface.GitBlobHashName: "2ed93ed11881b0c5ec6c7f28fa599f1d8e0f10cb"}
+	cedarPolicy, err := rootMetadata.AddCedarPolicy("no-tags", hashes)
+	assert.Nil(t, err)
+	assert.Equal(t, "no-tags", cedarPolicy.ID())
+	assert.Equal(t, hashes, cedarPolicy.GetHashes())
+
+	_, err = rootMetadata.AddCedarPolicy("no-tags", hashes)
+	assert.ErrorIs(t, err, tuf.ErrDuplicatedCedarPolicyName)
+
+	policies, err := rootMetadata.GetCedarPolicies()
+	assert.Nil(t, err)
+	assert.Len(t, policies, 1)
+}
+
+func TestRemoveCedarPolicy(t *testing.T) {
+	t.Parallel()
+
+	rootMetadata := initialTestRootMetadata(t)
+
+	err := rootMetadata.RemoveCedarPolicy("no-tags")
+	assert.ErrorIs(t, err, tuf.ErrNoCedarPoliciesDefined)
+
+	_, err = rootMetadata.AddCedarPolicy("no-tags", map[string]string{gitinterface.GitBlobHashName: "abc"})
+	assert.Nil(t, err)
+
+	err = rootMetadata.RemoveCedarPolicy("other")
+	assert.ErrorIs(t, err, tuf.ErrCedarPolicyNotFound)
+
+	err = rootMetadata.RemoveCedarPolicy("no-tags")
+	assert.Nil(t, err)
+
+	_, err = rootMetadata.GetCedarPolicies()
+	assert.ErrorIs(t, err, tuf.ErrNoCedarPoliciesDefined)
+}
+
+func TestCedarPolicyRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	rootMetadata := initialTestRootMetadata(t)
+	_, err := rootMetadata.AddCedarPolicy("no-tags", map[string]string{gitinterface.GitBlobHashName: "abc", "sha256": "def"})
+	assert.Nil(t, err)
+
+	rootBytes, err := json.Marshal(rootMetadata)
+	assert.Nil(t, err)
+
+	loaded := &RootMetadata{}
+	err = json.Unmarshal(rootBytes, loaded)
+	assert.Nil(t, err)
+
+	policies, err := loaded.GetCedarPolicies()
+	assert.Nil(t, err)
+	assert.Len(t, policies, 1)
+	assert.Equal(t, "no-tags", policies[0].ID())
+}
+
+func TestGroups(t *testing.T) {
+	t.Parallel()
+
+	rootMetadata := initialTestRootMetadata(t)
+
+	_, err := rootMetadata.GetGroups()
+	assert.ErrorIs(t, err, tuf.ErrNoGroupsDefined)
+
+	err = rootMetadata.AddGroup("release-team", []string{"alice", "bob"})
+	assert.Nil(t, err)
+
+	err = rootMetadata.AddGroup("release-team", []string{"carol"})
+	assert.ErrorIs(t, err, tuf.ErrGroupAlreadyExists)
+
+	groups, err := rootMetadata.GetGroups()
+	assert.Nil(t, err)
+	assert.Equal(t, map[string][]string{"release-team": {"alice", "bob"}}, groups)
+
+	err = rootMetadata.RemoveGroup("other")
+	assert.ErrorIs(t, err, tuf.ErrGroupNotFound)
+
+	err = rootMetadata.RemoveGroup("release-team")
+	assert.Nil(t, err)
+
+	_, err = rootMetadata.GetGroups()
+	assert.ErrorIs(t, err, tuf.ErrNoGroupsDefined)
+}
+
+func TestGroupsRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	rootMetadata := initialTestRootMetadata(t)
+	err := rootMetadata.AddGroup("release-team", []string{"alice"})
+	assert.Nil(t, err)
+
+	rootBytes, err := json.Marshal(rootMetadata)
+	assert.Nil(t, err)
+
+	loaded := &RootMetadata{}
+	err = json.Unmarshal(rootBytes, loaded)
+	assert.Nil(t, err)
+
+	groups, err := loaded.GetGroups()
+	assert.Nil(t, err)
+	assert.Equal(t, []string{"alice"}, groups["release-team"])
+}

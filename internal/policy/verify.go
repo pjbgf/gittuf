@@ -20,11 +20,12 @@ import (
 	"github.com/gittuf/gittuf/internal/cache"
 	"github.com/gittuf/gittuf/internal/common/set"
 	"github.com/gittuf/gittuf/internal/policy/options/policy"
-	"github.com/gittuf/gittuf/internal/rsl"
 	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	"github.com/gittuf/gittuf/internal/tuf"
 	tufv02 "github.com/gittuf/gittuf/internal/tuf/v02"
 	"github.com/gittuf/gittuf/pkg/gitinterface"
+	"github.com/gittuf/gittuf/pkg/gitstore"
+	"github.com/gittuf/gittuf/pkg/rsl"
 	ita "github.com/in-toto/attestation/go/v1"
 )
 
@@ -46,14 +47,14 @@ type PolicyVerifier struct { //nolint:revive
 	// We want to call this PolicyVerifier to avoid any confusion with
 	// SignatureVerifier.
 
-	repo     *gitinterface.Repository
+	repo     gitstore.Storer
 	searcher searcher
 
 	persistentCacheEnabled bool
 	persistentCache        *cache.Persistent
 }
 
-func NewPolicyVerifier(repo *gitinterface.Repository) *PolicyVerifier {
+func NewPolicyVerifier(repo gitstore.Storer) *PolicyVerifier {
 	searcher := newSearcher(repo)
 	verifier := &PolicyVerifier{
 		repo:     repo,
@@ -271,7 +272,7 @@ func (v *PolicyVerifier) verifyMergeable(ctx context.Context, targetRef string, 
 		return false, err
 	}
 
-	_, rslEntrySignatureNeededForThreshold, err := verifyGitObjectAndAttestations(ctx, currentPolicy, fmt.Sprintf("%s:%s", gitReferenceRuleScheme, targetRef), gitinterface.ZeroHash, authorizationAttestation, withApproverPrincipalIDs(approverIDs), withVerifyMergeable())
+	_, rslEntrySignatureNeededForThreshold, err := verifyGitObjectAndAttestations(ctx, currentPolicy, fmt.Sprintf("%s:%s", gitReferenceRuleScheme, targetRef), nil, authorizationAttestation, withApproverPrincipalIDs(approverIDs), withVerifyMergeable())
 	if err != nil {
 		return false, fmt.Errorf("not enough approvals to meet Git namespace policies, %w", ErrVerificationFailed)
 	}
@@ -527,7 +528,7 @@ func (v *PolicyVerifier) VerifyRelativeForRef(ctx context.Context, firstEntry, l
 				}
 				slog.Debug("Checking if entry is for policy reference...")
 				if entry.GetRefName() == PolicyRef {
-					if entry.GetID().Equal(firstEntry.GetID()) {
+					if entry.GetID().Equal(firstEntry.GetID().Bytes()) {
 						// We've already loaded this policy
 						continue
 					}
@@ -817,7 +818,7 @@ func (s *State) VerifyNewState(ctx context.Context, newPolicy *State) error {
 		return err
 	}
 
-	if _, err := rootVerifier.Verify(ctx, gitinterface.ZeroHash, newPolicy.Metadata.RootEnvelope); err != nil {
+	if _, err := rootVerifier.Verify(ctx, nil, newPolicy.Metadata.RootEnvelope); err != nil {
 		return err
 	}
 
@@ -848,7 +849,7 @@ func (s *State) VerifyNewState(ctx context.Context, newPolicy *State) error {
 // via the RSL across all refs. Then, it uses the policy applicable at the
 // commit's first entry into the repository. If the commit is brand new to the
 // repository, the specified policy is used.
-func verifyEntry(ctx context.Context, repo *gitinterface.Repository, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) error {
+func verifyEntry(ctx context.Context, repo gitstore.Storer, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) error {
 	if entry.RefName == PolicyRef || entry.RefName == attestations.Ref {
 		return nil
 	}
@@ -871,44 +872,43 @@ func verifyEntry(ctx context.Context, repo *gitinterface.Repository, policy *Sta
 		return fmt.Errorf("verifying Git namespace policies failed, %w", ErrVerificationFailed)
 	}
 
-	// Check if policy has file rules at all for efficiency
-	if !policy.hasFileRule {
-		// No file rules to verify
-		return nil
-	}
+	if policy.hasFileRule {
+		// Verify modified files
 
-	// Verify modified files
-
-	// First, get all commits between the current and last entry for the ref.
-	commitIDs, err := getCommits(repo, entry) // note: this is ordered by commit ID
-	if err != nil {
-		return err
-	}
-
-	for _, commitID := range commitIDs {
-		paths, err := repo.GetFilePathsChangedByCommit(commitID)
+		// First, get all commits between the current and last entry for the ref.
+		commitIDs, err := getCommits(repo, entry) // note: this is ordered by commit ID
 		if err != nil {
 			return err
 		}
 
-		verifiedUsing := "" // this will be set after one successful verification of the commit to avoid repeated signature verification
-		for _, path := range paths {
-			// If we've already verified and identified commit signature, we
-			// can just check if that verifier is trusted for the new path.
-			// If not found, we don't make any assumptions about it being a
-			// failure in case of name mismatches. So, the signature check
-			// proceeds as usual.
-			verifiedUsing, _, err = verifyGitObjectAndAttestations(ctx, policy, fmt.Sprintf("%s:%s", fileRuleScheme, path), commitID, authorizationAttestation, withApproverPrincipalIDs(approverKeyIDs), withTrustedVerifier(verifiedUsing))
+		for _, commitID := range commitIDs {
+			paths, err := repo.GetFilePathsChangedByCommit(commitID)
 			if err != nil {
-				return fmt.Errorf("verifying file namespace policies failed, %w", ErrVerificationFailed)
+				return err
+			}
+
+			verifiedUsing := "" // this will be set after one successful verification of the commit to avoid repeated signature verification
+			for _, path := range paths {
+				// If we've already verified and identified commit signature, we
+				// can just check if that verifier is trusted for the new path.
+				// If not found, we don't make any assumptions about it being a
+				// failure in case of name mismatches. So, the signature check
+				// proceeds as usual.
+				verifiedUsing, _, err = verifyGitObjectAndAttestations(ctx, policy, fmt.Sprintf("%s:%s", fileRuleScheme, path), commitID, authorizationAttestation, withApproverPrincipalIDs(approverKeyIDs), withTrustedVerifier(verifiedUsing))
+				if err != nil {
+					return fmt.Errorf("verifying file namespace policies failed, %w", ErrVerificationFailed)
+				}
 			}
 		}
 	}
 
-	return nil
+	// Apply the Cedar veto over the full change context. This must run even
+	// when no file rules exist and for namespaces no rule protects: veto
+	// policies apply repository-wide.
+	return applyCedarVeto(ctx, repo, policy, entry)
 }
 
-func verifyTagEntry(ctx context.Context, repo *gitinterface.Repository, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) error {
+func verifyTagEntry(ctx context.Context, repo gitstore.Storer, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) error {
 	entryTagRef, err := repo.GetReference(entry.RefName)
 	if err != nil {
 		return err
@@ -932,10 +932,10 @@ func verifyTagEntry(ctx context.Context, repo *gitinterface.Repository, policy *
 		return fmt.Errorf("verifying tag entry failed, %w: %w", ErrVerificationFailed, err)
 	}
 
-	return nil
+	return applyCedarVeto(ctx, repo, policy, entry)
 }
 
-func getApproverAttestationAndKeyIDs(ctx context.Context, repo *gitinterface.Repository, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) (*sslibdsse.Envelope, *set.Set[string], error) {
+func getApproverAttestationAndKeyIDs(ctx context.Context, repo gitstore.Storer, policy *State, attestationsState *attestations.Attestations, entry *rsl.ReferenceEntry) (*sslibdsse.Envelope, *set.Set[string], error) {
 	if attestationsState == nil {
 		return nil, nil, nil
 	}
@@ -977,7 +977,7 @@ func getApproverAttestationAndKeyIDs(ctx context.Context, repo *gitinterface.Rep
 	return getApproverAttestationAndKeyIDsForIndex(ctx, repo, policy, attestationsState, entry.RefName, fromID, toID, isTag)
 }
 
-func getApproverAttestationAndKeyIDsForIndex(ctx context.Context, repo *gitinterface.Repository, policy *State, attestationsState *attestations.Attestations, targetRef string, fromID, toID gitinterface.Hash, isTag bool) (*sslibdsse.Envelope, *set.Set[string], error) {
+func getApproverAttestationAndKeyIDsForIndex(ctx context.Context, repo gitstore.Storer, policy *State, attestationsState *attestations.Attestations, targetRef string, fromID, toID gitinterface.Hash, isTag bool) (*sslibdsse.Envelope, *set.Set[string], error) {
 	if attestationsState == nil {
 		return nil, nil, nil
 	}
@@ -1062,7 +1062,7 @@ func getApproverAttestationAndKeyIDsForIndex(ctx context.Context, repo *gitinter
 // getCommits identifies the commits introduced to the entry's ref since the
 // last RSL entry for the same ref. These commits are then verified for file
 // policies.
-func getCommits(repo *gitinterface.Repository, entry *rsl.ReferenceEntry) ([]gitinterface.Hash, error) {
+func getCommits(repo gitstore.Storer, entry *rsl.ReferenceEntry) ([]gitinterface.Hash, error) {
 	firstEntry := false
 
 	priorRefEntry, _, err := rsl.GetLatestReferenceUpdaterEntry(repo, rsl.ForReference(entry.RefName), rsl.BeforeEntryID(entry.ID))
@@ -1075,7 +1075,7 @@ func getCommits(repo *gitinterface.Repository, entry *rsl.ReferenceEntry) ([]git
 	}
 
 	if firstEntry {
-		return repo.GetCommitsBetweenRange(entry.TargetID, gitinterface.ZeroHash)
+		return repo.GetCommitsBetweenRange(entry.TargetID, nil)
 	}
 
 	return repo.GetCommitsBetweenRange(entry.TargetID, priorRefEntry.GetTargetID())
@@ -1128,7 +1128,7 @@ func withTagObjectID(objID gitinterface.Hash) verifyGitObjectAndAttestationsOpti
 }
 
 func verifyGitObjectAndAttestations(ctx context.Context, policy *State, target string, gitID gitinterface.Hash, authorizationAttestation *sslibdsse.Envelope, opts ...verifyGitObjectAndAttestationsOption) (string, bool, error) {
-	options := &verifyGitObjectAndAttestationsOptions{tagObjectID: gitinterface.ZeroHash}
+	options := &verifyGitObjectAndAttestationsOptions{}
 	for _, fn := range opts {
 		fn(options)
 	}

@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/gittuf/gittuf/internal/rsl"
 	"github.com/gittuf/gittuf/internal/signerverifier/dsse"
 	"github.com/gittuf/gittuf/internal/signerverifier/gpg"
 	"github.com/gittuf/gittuf/internal/signerverifier/ssh"
@@ -19,6 +18,7 @@ import (
 	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
 	tufv02 "github.com/gittuf/gittuf/internal/tuf/v02"
 	"github.com/gittuf/gittuf/pkg/gitinterface"
+	"github.com/gittuf/gittuf/pkg/rsl"
 )
 
 var (
@@ -54,6 +54,29 @@ func createTestRepository(t *testing.T, stateCreator func(*testing.T) *State, op
 	latestEntry, err := rsl.GetLatestEntry(repo)
 	if err != nil {
 		t.Fatal(err)
+	}
+	state.loadedEntry = latestEntry.(rsl.ReferenceUpdaterEntry)
+
+	return repo, state
+}
+
+func createTestRepositoryFromState(tb testing.TB, state *State) (*gitinterface.Repository, *State) {
+	tb.Helper()
+
+	tempDir := tb.TempDir()
+	repo := gitinterface.CreateTestGitRepository(tb, tempDir, false)
+	state.repository = repo
+
+	if err := state.Commit(repo, "Create test state", true, false); err != nil {
+		tb.Fatal(err)
+	}
+	if err := Apply(testCtx, repo, false); err != nil {
+		tb.Fatal(err)
+	}
+
+	latestEntry, err := rsl.GetLatestEntry(repo)
+	if err != nil {
+		tb.Fatal(err)
 	}
 	state.loadedEntry = latestEntry.(rsl.ReferenceUpdaterEntry)
 
@@ -1094,7 +1117,64 @@ func createTestStateWithTagPolicyForUnauthorizedTest(t *testing.T) *State {
 	return state
 }
 
-func setupSSHKeysForSigning(t *testing.T, privateBytes, publicBytes []byte) *ssh.Signer {
+func createTestRepositoryWithCedarPolicy(t *testing.T, cedarSource string, groups map[string][]string) (*gitinterface.Repository, *State) {
+	t.Helper()
+
+	state := createTestStateWithPolicy(t)
+
+	tempDir := t.TempDir()
+	repo := gitinterface.CreateTestGitRepository(t, tempDir, false)
+	state.repository = repo
+
+	blobID, err := repo.WriteBlob([]byte(cedarSource))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootMetadata, err := state.GetRootMetadata(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootMetadata.AddCedarPolicy("test-cedar", map[string]string{gitinterface.GitBlobHashName: blobID.String()}); err != nil {
+		t.Fatal(err)
+	}
+	for group, members := range groups {
+		if err := rootMetadata.AddGroup(group, members); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	signer := setupSSHKeysForSigning(t, rootKeyBytes, rootPubKeyBytes)
+	rootEnv, err := dsse.CreateEnvelope(rootMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootEnv, err = dsse.SignEnvelope(testCtx, rootEnv, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Metadata.RootEnvelope = rootEnv
+
+	if err := state.preprocess(); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Commit(repo, "Create test state with cedar", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(testCtx, repo, false); err != nil {
+		t.Fatal(err)
+	}
+
+	latestEntry, err := rsl.GetLatestEntry(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.loadedEntry = latestEntry.(rsl.ReferenceUpdaterEntry)
+
+	return repo, state
+}
+
+func setupSSHKeysForSigning(t testing.TB, privateBytes, publicBytes []byte) *ssh.Signer {
 	t.Helper()
 
 	keysDir := t.TempDir()

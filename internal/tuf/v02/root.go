@@ -10,6 +10,7 @@ import (
 	"github.com/gittuf/gittuf/internal/common/set"
 	"github.com/gittuf/gittuf/internal/tuf"
 	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
+	"github.com/gittuf/gittuf/pkg/gitinterface"
 )
 
 const (
@@ -30,6 +31,8 @@ type RootMetadata struct {
 	Propagations       []tuf.PropagationDirective `json:"propagations,omitempty"`
 	MultiRepository    *MultiRepository           `json:"multiRepository,omitempty"`
 	Hooks              map[tuf.HookStage][]*Hook  `json:"hooks,omitempty"`
+	CedarPolicies      []*CedarPolicy             `json:"cedarPolicies,omitempty"`
+	Groups             map[string][]string        `json:"groups,omitempty"`
 }
 
 // NewRootMetadata returns a new instance of RootMetadata.
@@ -375,6 +378,8 @@ func (r *RootMetadata) UnmarshalJSON(data []byte) error {
 		Propagations       []json.RawMessage          `json:"propagations,omitempty"`
 		MultiRepository    *MultiRepository           `json:"multiRepository,omitempty"`
 		Hooks              map[tuf.HookStage][]*Hook  `json:"hooks,omitempty"`
+		CedarPolicies      []*CedarPolicy             `json:"cedarPolicies,omitempty"`
+		Groups             map[string][]string        `json:"groups,omitempty"`
 	}
 
 	temp := &tempType{}
@@ -465,6 +470,8 @@ func (r *RootMetadata) UnmarshalJSON(data []byte) error {
 	r.MultiRepository = temp.MultiRepository
 
 	r.Hooks = temp.Hooks
+	r.CedarPolicies = temp.CedarPolicies
+	r.Groups = temp.Groups
 
 	return nil
 }
@@ -1065,6 +1072,115 @@ func (r *RootMetadata) GetHooks(stage tuf.HookStage) ([]tuf.Hook, error) {
 		hooks = append(hooks, hook)
 	}
 	return hooks, nil
+}
+
+// CedarPolicy defines the schema for a cedar policy declaration.
+type CedarPolicy struct {
+	Name   string            `json:"name"`
+	Hashes map[string]string `json:"hashes"`
+}
+
+// ID returns the identifier of the cedar policy, its name.
+func (c *CedarPolicy) ID() string {
+	return c.Name
+}
+
+// GetHashes returns the hashes of the cedar policy file.
+func (c *CedarPolicy) GetHashes() map[string]string {
+	return c.Hashes
+}
+
+// GetBlobID returns the Git blob ID for the cedar policy file.
+func (c *CedarPolicy) GetBlobID() gitinterface.Hash {
+	hash, _ := gitinterface.NewHash(c.Hashes[gitinterface.GitBlobHashName])
+	return hash
+}
+
+// AddCedarPolicy adds the specified cedar policy to the metadata.
+func (r *RootMetadata) AddCedarPolicy(policyName string, hashes map[string]string) (tuf.CedarPolicy, error) {
+	for _, existing := range r.CedarPolicies {
+		if existing.Name == policyName {
+			return nil, tuf.ErrDuplicatedCedarPolicyName
+		}
+	}
+
+	cedarPolicy := &CedarPolicy{Name: policyName, Hashes: hashes}
+	r.CedarPolicies = append(r.CedarPolicies, cedarPolicy)
+	return cedarPolicy, nil
+}
+
+// RemoveCedarPolicy removes the cedar policy identified by policyName.
+func (r *RootMetadata) RemoveCedarPolicy(policyName string) error {
+	if len(r.CedarPolicies) == 0 {
+		return tuf.ErrNoCedarPoliciesDefined
+	}
+
+	policies := make([]*CedarPolicy, 0, len(r.CedarPolicies))
+	found := false
+	for _, cedarPolicy := range r.CedarPolicies {
+		if cedarPolicy.Name == policyName {
+			found = true
+			continue
+		}
+		policies = append(policies, cedarPolicy)
+	}
+	if !found {
+		return tuf.ErrCedarPolicyNotFound
+	}
+
+	r.CedarPolicies = policies
+	return nil
+}
+
+// GetCedarPolicies returns the cedar policies in the metadata.
+func (r *RootMetadata) GetCedarPolicies() ([]tuf.CedarPolicy, error) {
+	if len(r.CedarPolicies) == 0 {
+		return nil, tuf.ErrNoCedarPoliciesDefined
+	}
+
+	policies := make([]tuf.CedarPolicy, 0, len(r.CedarPolicies))
+	for _, cedarPolicy := range r.CedarPolicies {
+		policies = append(policies, cedarPolicy)
+	}
+	return policies, nil
+}
+
+// AddGroup declares a group of principals that cedar policies can refer to.
+// Member IDs are not validated here: principals may be declared in rule files
+// rather than the root metadata, so membership is resolved against all
+// declared principals at verification time (unknown IDs are inert).
+func (r *RootMetadata) AddGroup(groupName string, principalIDs []string) error {
+	if r.Groups == nil {
+		r.Groups = map[string][]string{}
+	}
+
+	if _, exists := r.Groups[groupName]; exists {
+		return tuf.ErrGroupAlreadyExists
+	}
+
+	r.Groups[groupName] = principalIDs
+	return nil
+}
+
+// RemoveGroup removes the group identified by groupName.
+func (r *RootMetadata) RemoveGroup(groupName string) error {
+	if len(r.Groups) == 0 {
+		return tuf.ErrNoGroupsDefined
+	}
+	if _, exists := r.Groups[groupName]; !exists {
+		return tuf.ErrGroupNotFound
+	}
+
+	delete(r.Groups, groupName)
+	return nil
+}
+
+// GetGroups returns the groups declared in the metadata.
+func (r *RootMetadata) GetGroups() (map[string][]string, error) {
+	if len(r.Groups) == 0 {
+		return nil, tuf.ErrNoGroupsDefined
+	}
+	return r.Groups, nil
 }
 
 type GitHubApp = tufv01.GitHubApp

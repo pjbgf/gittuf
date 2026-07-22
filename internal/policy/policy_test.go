@@ -6,22 +6,37 @@ package policy
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"path"
 	"testing"
 
 	"github.com/gittuf/gittuf/internal/common/set"
 	policyopts "github.com/gittuf/gittuf/internal/policy/options/policy"
-	"github.com/gittuf/gittuf/internal/rsl"
+	"github.com/gittuf/gittuf/internal/propagation"
 	"github.com/gittuf/gittuf/internal/signerverifier/dsse"
 	"github.com/gittuf/gittuf/internal/signerverifier/gpg"
 	"github.com/gittuf/gittuf/internal/signerverifier/ssh"
+	sslibdsse "github.com/gittuf/gittuf/internal/third_party/go-securesystemslib/dsse"
 	"github.com/gittuf/gittuf/internal/tuf"
 	tufv01 "github.com/gittuf/gittuf/internal/tuf/v01"
 	"github.com/gittuf/gittuf/pkg/gitinterface"
+	"github.com/gittuf/gittuf/pkg/rsl"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestStateMetadataWriteTreeStorerError(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	repo := gitinterface.CreateTestGitRepository(t, tmpDir, false)
+
+	metadata := &StateMetadata{RootEnvelope: &sslibdsse.Envelope{}}
+
+	injected := errors.New("write blob failure")
+	_, err := metadata.WriteTree(&overrideStorer{Storer: repo, writeBlobErr: injected})
+	assert.ErrorIs(t, err, injected)
+}
 
 func TestLoadState(t *testing.T) {
 	t.Run("loading while verifying multiple states", func(t *testing.T) {
@@ -580,7 +595,7 @@ func TestStateVerify(t *testing.T) {
 		require.Nil(t, err)
 		networkState.loadedEntry = latestNetworkEntry.(rsl.ReferenceUpdaterEntry)
 
-		err = rsl.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, networkRootMetadata.GetPropagationDirectives(), false)
+		err = propagation.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, networkRootMetadata.GetPropagationDirectives(), false)
 		require.Nil(t, err)
 
 		latestEntry, err := rsl.GetLatestEntry(networkRepository)
@@ -646,7 +661,7 @@ func TestStateVerify(t *testing.T) {
 		require.Nil(t, err)
 		networkState.loadedEntry = latestNetworkEntry.(rsl.ReferenceUpdaterEntry)
 
-		err = rsl.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
+		err = propagation.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
 		require.Nil(t, err)
 
 		latestEntry, err := rsl.GetLatestEntry(networkRepository)
@@ -660,7 +675,10 @@ func TestStateVerify(t *testing.T) {
 }
 
 func TestStateCommit(t *testing.T) {
+	t.Parallel()
+
 	t.Run("no controller metadata", func(t *testing.T) {
+		t.Parallel()
 		repo, _ := createTestRepository(t, createTestStateWithOnlyRoot)
 		// Commit and Apply are called by the helper
 
@@ -679,6 +697,7 @@ func TestStateCommit(t *testing.T) {
 	})
 
 	t.Run("with single controller metadata", func(t *testing.T) {
+		t.Parallel()
 		// Create a state for controller repo, let's get the metadata from this
 		// state and embed into another
 		controllerState := createTestStateWithOnlyRoot(t)
@@ -719,6 +738,7 @@ func TestStateCommit(t *testing.T) {
 	})
 
 	t.Run("with multiple controller metadata", func(t *testing.T) {
+		t.Parallel()
 		// Create states for controller repos, let's get the metadata from these
 		// states and embed into another
 		controller1State := createTestStateWithOnlyRoot(t)
@@ -769,6 +789,7 @@ func TestStateCommit(t *testing.T) {
 	})
 
 	t.Run("with nested controller metadata", func(t *testing.T) {
+		t.Parallel()
 		// Create states for controller repos, let's get the metadata from these
 		// states and embed into another
 		controller1State := createTestStateWithOnlyRoot(t)
@@ -996,7 +1017,10 @@ func TestStateHasRuleName(t *testing.T) {
 }
 
 func TestApply(t *testing.T) {
+	t.Parallel()
+
 	t.Run("regular apply", func(t *testing.T) {
+		t.Parallel()
 		repo, state := createTestRepository(t, createTestStateWithOnlyRoot)
 
 		key := tufv01.NewKeyFromSSLibKey(ssh.NewKeyFromBytes(t, rootPubKeyBytes))
@@ -1410,7 +1434,7 @@ func TestReconcileStaging(t *testing.T) {
 
 		// 1. Now, propagate changes from the controller into the network
 		// repository
-		err = rsl.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
+		err = propagation.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
 		require.Nil(t, err)
 
 		// These should not be equal, as policy has been updated, but *not*
@@ -1509,7 +1533,7 @@ func TestReconcileStaging(t *testing.T) {
 		// 2. Apply the controller's changes and propagate
 		err = Apply(testCtx, controllerRepository, false)
 		require.Nil(t, err)
-		err = rsl.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
+		err = propagation.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
 		require.Nil(t, err)
 
 		// The network repository's staging ref should not have changed since
@@ -1621,7 +1645,7 @@ func TestReconcileStaging(t *testing.T) {
 
 		// 3. Propagate changes from the controller repository into the network
 		// repository
-		err = rsl.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
+		err = propagation.PropagateChangesFromUpstreamRepository(networkRepository, controllerRepository, getPropagationDirectivesForNetworkRepository(t, networkRootMetadata), false)
 		require.Nil(t, err)
 
 		// These should not be equal, as policy has been updated, but *not*
@@ -1720,4 +1744,67 @@ func setupControllerAndNetworkRepositories(t *testing.T, controllerRepositoryLoc
 	require.Nil(t, err)
 
 	return controllerRepository, networkRepository, signer
+}
+
+func TestStateCedarPolicies(t *testing.T) {
+	t.Parallel()
+
+	state := createTestStateWithPolicy(t)
+
+	tempDir := t.TempDir()
+	repo := gitinterface.CreateTestGitRepository(t, tempDir, false)
+	state.repository = repo
+
+	blobID, err := repo.WriteBlob([]byte(`forbid (principal, action, resource);`))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rootMetadata, err := state.GetRootMetadata(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rootMetadata.AddCedarPolicy("no-tags", map[string]string{gitinterface.GitBlobHashName: blobID.String()}); err != nil {
+		t.Fatal(err)
+	}
+	if err := rootMetadata.AddGroup("release-team", []string{"alice"}); err != nil {
+		t.Fatal(err)
+	}
+
+	signer := setupSSHKeysForSigning(t, rootKeyBytes, rootPubKeyBytes)
+	rootEnv, err := dsse.CreateEnvelope(rootMetadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootEnv, err = dsse.SignEnvelope(testCtx, rootEnv, signer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Metadata.RootEnvelope = rootEnv
+
+	if err := state.preprocess(); err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Len(t, state.CedarPolicies, 1)
+	assert.Equal(t, "no-tags", state.CedarPolicies[0].ID())
+	assert.Equal(t, []string{"alice"}, state.Groups["release-team"])
+
+	if err := state.Commit(repo, "Add cedar policy", false, false); err != nil {
+		t.Fatal(err)
+	}
+
+	stagingTip, err := repo.GetReference(PolicyStagingRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	treeID, err := repo.GetCommitTreeID(stagingTip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files, err := repo.GetAllFilesInTree(treeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, blobID.String(), files["cedar/no-tags"].String())
 }
