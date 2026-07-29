@@ -24,7 +24,7 @@ the gittuf/community repository.
 
 | Number | Title | Implemented | Withdrawn / Rejected |
 |--------|-------|-------------|----------------------|
-| 1 | [Providing SHA-256 Identifiers Alongside Existing SHA-1 Identifiers](/docs/gaps/1/README.md) | No | No |
+| 1 | [Verifiable Repository Snapshots for Hash Algorithm Transitions](/docs/gaps/1/README.md) | No | No |
 | 2 | [gittuf on the Forge](/docs/gaps/2/README.md) | No | No |
 | 3 | [Authentication Evidence Attestations](/docs/gaps/3/README.md) | No | No |
 | 4 | [Supporting Global Constraints in gittuf](/docs/gaps/4/README.md) | No | No |
