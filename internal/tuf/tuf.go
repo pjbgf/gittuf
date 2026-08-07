@@ -75,6 +75,7 @@ var (
 	ErrInvalidHookEnvironment                          = errors.New("invalid environment for hook")
 	ErrHookNotFound                                    = errors.New("cannot find hook entry")
 	ErrNoHooksDefined                                  = errors.New("no hooks defined")
+	ErrInvalidCustomFields                             = errors.New("invalid custom fields")
 )
 
 // Principal represents an entity that is granted trust by gittuf metadata. In
@@ -230,6 +231,18 @@ type RootMetadata interface {
 	RemoveHook(stages []HookStage, hookName string) error
 	// GetHooks returns all hooks in the metadata for the specified Git stage.
 	GetHooks(stage HookStage) ([]Hook, error)
+
+	// SetCustomField sets an application-defined custom field in the root
+	// metadata. The key must begin with CustomFieldPrefix and follow the same
+	// format and length rules as RSL entry custom fields. It is validated and
+	// covered by the metadata's DSSE signature.
+	SetCustomField(key, value string) error
+	// GetCustomFields returns the application-defined custom fields in the root
+	// metadata. It returns nil if none are set.
+	GetCustomFields() map[string]string
+	// DeleteCustomField removes the custom field identified by key. It is a
+	// no-op if the key is absent.
+	DeleteCustomField(key string)
 }
 
 // TargetsMetadata represents gittuf's rule files. Its name is inspired by TUF.

@@ -5,11 +5,13 @@ package v02
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -1087,4 +1089,152 @@ func TestRemoveHook(t *testing.T) {
 	err = rootMetadata.RemoveHook([]tuf.HookStage{tuf.HookStagePrePush}, "test-hook")
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(rootMetadata.Hooks[tuf.HookStagePrePush]))
+}
+
+var _ tuf.RootMetadata = &RootMetadata{}
+
+func TestRootMetadataCustomFields(t *testing.T) {
+	t.Run("set, get, and delete", func(t *testing.T) {
+		rootMetadata := NewRootMetadata()
+
+		assert.Nil(t, rootMetadata.GetCustomFields())
+
+		err := rootMetadata.SetCustomField("custom.entire.io/repository", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+		require.NoError(t, err)
+
+		fields := rootMetadata.GetCustomFields()
+		assert.Equal(t, map[string]string{"custom.entire.io/repository": "01ARZ3NDEKTSV4RRFFQ69G5FAV"}, fields)
+
+		// GetCustomFields returns a copy, so mutating it does not affect the
+		// stored map.
+		fields["custom.entire.io/repository"] = "tampered"
+		assert.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", rootMetadata.GetCustomFields()["custom.entire.io/repository"])
+
+		rootMetadata.DeleteCustomField("custom.entire.io/repository")
+		assert.Nil(t, rootMetadata.GetCustomFields())
+
+		// DeleteCustomField on absent key is a no-op.
+		rootMetadata.DeleteCustomField("custom.entire.io/repository")
+	})
+
+	t.Run("validation", func(t *testing.T) {
+		invalid := map[string]struct {
+			key   string
+			value string
+		}{
+			"missing namespace":    {"field", "value"},
+			"no custom prefix":     {"entire.io/repository", "value"},
+			"no name separator":    {"custom.entire.io", "value"},
+			"empty name":           {"custom.entire.io/", "value"},
+			"empty domain":         {"custom./field", "value"},
+			"uppercase key":        {"custom.entire.io/Repository", "value"},
+			"key with space":       {"custom.entire.io/repo id", "value"},
+			"bad domain label":     {"custom.-bad.io/field", "value"},
+			"name too long":        {"custom.entire.io/" + strings.Repeat("a", 64), "value"},
+			"value with colon":     {"custom.entire.io/field", "a:b"},
+			"multiline value":      {"custom.entire.io/field", "first\nsecond"},
+			"value leading space":  {"custom.entire.io/field", " value"},
+			"value trailing space": {"custom.entire.io/field", "value "},
+			"value too long":       {"custom.entire.io/field", strings.Repeat("a", 500)},
+		}
+
+		for name, tc := range invalid {
+			t.Run(name, func(t *testing.T) {
+				rootMetadata := NewRootMetadata()
+				err := rootMetadata.SetCustomField(tc.key, tc.value)
+				assert.ErrorIs(t, err, tuf.ErrInvalidCustomFields)
+				assert.Nil(t, rootMetadata.GetCustomFields())
+			})
+		}
+
+		valid := map[string]struct {
+			key   string
+			value string
+		}{
+			"ulid repository": {"custom.entire.io/repository", "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+			"symbols":         {"custom.example.com/field", "v1.2.3-rc.1/build(42),ok"},
+			"internal space":  {"custom.example.com/field", "hello world"},
+			"subdomains":      {"custom.a.b.example.com/x-y_z.1", "value"},
+		}
+
+		for name, tc := range valid {
+			t.Run(name, func(t *testing.T) {
+				rootMetadata := NewRootMetadata()
+				err := rootMetadata.SetCustomField(tc.key, tc.value)
+				require.NoError(t, err)
+				assert.Equal(t, tc.value, rootMetadata.GetCustomFields()[tc.key])
+			})
+		}
+	})
+
+	t.Run("too many fields", func(t *testing.T) {
+		rootMetadata := NewRootMetadata()
+		for i := 0; i < 20; i++ {
+			require.NoError(t, rootMetadata.SetCustomField(fmt.Sprintf("custom.entire.io/field-%d", i), "v"))
+		}
+		err := rootMetadata.SetCustomField("custom.entire.io/field-20", "v")
+		assert.ErrorIs(t, err, tuf.ErrInvalidCustomFields)
+	})
+
+	t.Run("json round-trip", func(t *testing.T) {
+		rootMetadata := NewRootMetadata()
+		require.NoError(t, rootMetadata.SetCustomField("custom.entire.io/repository", "01ARZ3NDEKTSV4RRFFQ69G5FAV"))
+
+		payload, err := json.Marshal(rootMetadata)
+		require.NoError(t, err)
+		assert.Contains(t, string(payload), "custom.entire.io/repository")
+
+		decoded := &RootMetadata{}
+		require.NoError(t, json.Unmarshal(payload, decoded))
+		assert.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", decoded.GetCustomFields()["custom.entire.io/repository"])
+	})
+}
+
+func TestRootMetadataCustomFieldsSignatureCoverage(t *testing.T) {
+	tmpDir := t.TempDir()
+	keyPath := filepath.Join(tmpDir, "rsa")
+	if err := os.WriteFile(keyPath, artifacts.SSHRSAPrivate, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath+".pub", artifacts.SSHRSAPublicSSH, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	sslibKeyO, err := ssh.NewKeyFromFile(keyPath)
+	require.NoError(t, err)
+	sslibKey := NewKeyFromSSLibKey(sslibKeyO)
+
+	rootMetadata := NewRootMetadata()
+	require.NoError(t, rootMetadata.addPrincipal(sslibKey))
+	require.NoError(t, rootMetadata.SetCustomField("custom.entire.io/repository", "01ARZ3NDEKTSV4RRFFQ69G5FAV"))
+
+	ctx := context.Background()
+	env, err := dsse.CreateEnvelope(rootMetadata)
+	require.NoError(t, err)
+
+	verifier, err := ssh.NewVerifierFromKey(sslibKeyO)
+	require.NoError(t, err)
+	signer := &ssh.Signer{Verifier: verifier, Path: keyPath}
+
+	env, err = dsse.SignEnvelope(ctx, env, signer)
+	require.NoError(t, err)
+
+	// The signed envelope verifies as-is.
+	_, err = dsse.VerifyEnvelope(ctx, env, []sslibdsse.Verifier{verifier}, 1)
+	require.NoError(t, err)
+
+	// Tamper with the custom field inside the signed payload and confirm
+	// verification now fails, proving the field is inside the signed bytes.
+	payload, err := env.DecodeB64Payload()
+	require.NoError(t, err)
+	tampered := &RootMetadata{}
+	require.NoError(t, json.Unmarshal(payload, tampered))
+	require.NoError(t, tampered.SetCustomField("custom.entire.io/repository", "01BX5ZZKBKACTAV9WEVGEMMVRZ"))
+
+	tamperedPayload, err := json.Marshal(tampered)
+	require.NoError(t, err)
+	env.Payload = base64.StdEncoding.EncodeToString(tamperedPayload)
+
+	_, err = dsse.VerifyEnvelope(ctx, env, []sslibdsse.Verifier{verifier}, 1)
+	assert.Error(t, err)
 }

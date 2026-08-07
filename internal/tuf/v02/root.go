@@ -30,6 +30,7 @@ type RootMetadata struct {
 	Propagations       []tuf.PropagationDirective `json:"propagations,omitempty"`
 	MultiRepository    *MultiRepository           `json:"multiRepository,omitempty"`
 	Hooks              map[tuf.HookStage][]*Hook  `json:"hooks,omitempty"`
+	CustomFields       map[string]string          `json:"customFields,omitempty"`
 }
 
 // NewRootMetadata returns a new instance of RootMetadata.
@@ -375,6 +376,7 @@ func (r *RootMetadata) UnmarshalJSON(data []byte) error {
 		Propagations       []json.RawMessage          `json:"propagations,omitempty"`
 		MultiRepository    *MultiRepository           `json:"multiRepository,omitempty"`
 		Hooks              map[tuf.HookStage][]*Hook  `json:"hooks,omitempty"`
+		CustomFields       map[string]string          `json:"customFields,omitempty"`
 	}
 
 	temp := &tempType{}
@@ -465,6 +467,8 @@ func (r *RootMetadata) UnmarshalJSON(data []byte) error {
 	r.MultiRepository = temp.MultiRepository
 
 	r.Hooks = temp.Hooks
+
+	r.CustomFields = temp.CustomFields
 
 	return nil
 }
@@ -1065,6 +1069,54 @@ func (r *RootMetadata) GetHooks(stage tuf.HookStage) ([]tuf.Hook, error) {
 		hooks = append(hooks, hook)
 	}
 	return hooks, nil
+}
+
+// SetCustomField sets an application-defined custom field in the root metadata.
+// The key must begin with tuf.CustomFieldPrefix and follow the same format and
+// length rules as RSL entry custom fields. The resulting set of fields is
+// validated as a whole, so the write is rejected if it would exceed the
+// permitted count. The map is created if it does not exist yet.
+func (r *RootMetadata) SetCustomField(key, value string) error {
+	candidate := make(map[string]string, len(r.CustomFields)+1)
+	for k, v := range r.CustomFields {
+		candidate[k] = v
+	}
+	candidate[key] = value
+
+	if err := tuf.ValidateCustomFields(candidate); err != nil {
+		return err
+	}
+
+	r.CustomFields = candidate
+	return nil
+}
+
+// GetCustomFields returns a copy of the application-defined custom fields in the
+// root metadata. It returns nil if none are set.
+func (r *RootMetadata) GetCustomFields() map[string]string {
+	if r.CustomFields == nil {
+		return nil
+	}
+
+	fields := make(map[string]string, len(r.CustomFields))
+	for key, value := range r.CustomFields {
+		fields[key] = value
+	}
+	return fields
+}
+
+// DeleteCustomField removes the custom field identified by key. It is a no-op if
+// the key is absent. The map is set to nil once it becomes empty so it does not
+// serialize.
+func (r *RootMetadata) DeleteCustomField(key string) {
+	if r.CustomFields == nil {
+		return
+	}
+
+	delete(r.CustomFields, key)
+	if len(r.CustomFields) == 0 {
+		r.CustomFields = nil
+	}
 }
 
 type GitHubApp = tufv01.GitHubApp

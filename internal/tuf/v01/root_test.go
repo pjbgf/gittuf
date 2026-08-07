@@ -1075,6 +1075,31 @@ func TestRemoveHook(t *testing.T) {
 	assert.Equal(t, 0, len(rootMetadata.Hooks[tuf.HookStagePrePush]))
 }
 
+var _ tuf.RootMetadata = &RootMetadata{}
+
+func TestRootMetadataCustomFields(t *testing.T) {
+	rootMetadata := NewRootMetadata()
+
+	assert.Nil(t, rootMetadata.GetCustomFields())
+
+	err := rootMetadata.SetCustomField("custom.entire.io/repository", "01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	require.NoError(t, err)
+	assert.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", rootMetadata.GetCustomFields()["custom.entire.io/repository"])
+
+	err = rootMetadata.SetCustomField("bad-key", "value")
+	assert.ErrorIs(t, err, tuf.ErrInvalidCustomFields)
+
+	payload, err := json.Marshal(rootMetadata)
+	require.NoError(t, err)
+
+	decoded := &RootMetadata{}
+	require.NoError(t, json.Unmarshal(payload, decoded))
+	assert.Equal(t, "01ARZ3NDEKTSV4RRFFQ69G5FAV", decoded.GetCustomFields()["custom.entire.io/repository"])
+
+	rootMetadata.DeleteCustomField("custom.entire.io/repository")
+	assert.Nil(t, rootMetadata.GetCustomFields())
+}
+
 func TestGitHubApp(t *testing.T) {
 	principalIDs := set.NewSetFromItems("alice")
 	githubApp := GitHubApp{
