@@ -1217,11 +1217,11 @@ func parseReferenceEntryText(id githash.Hash, text string) (*ReferenceEntry, err
 	entry := &ReferenceEntry{ID: id}
 	state := expectRef
 	for _, line := range body {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		key, rawValue, ok := strings.Cut(line, ":")
 		if !ok {
 			return nil, ErrInvalidRSLEntry
 		}
-		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		key, value := strings.TrimSpace(key), strings.TrimSpace(rawValue)
 
 		switch key {
 		case RefKey:
@@ -1255,7 +1255,7 @@ func parseReferenceEntryText(id githash.Hash, text string) (*ReferenceEntry, err
 					return nil, ErrInvalidRSLEntry
 				}
 				state = done
-				setCustomField(&entry.CustomFields, key, value)
+				setCustomField(&entry.CustomFields, key, rawValue)
 			}
 		}
 	}
@@ -1302,16 +1302,15 @@ func parseAnnotationEntryText(id githash.Hash, text string) (*AnnotationEntry, e
 
 	state := expectEntryID
 	for _, line := range body {
-		line = strings.TrimSpace(line)
-		if line == BeginMessage {
+		if strings.TrimSpace(line) == BeginMessage {
 			break
 		}
 
-		key, value, ok := strings.Cut(line, ":")
+		key, rawValue, ok := strings.Cut(line, ":")
 		if !ok {
 			return nil, ErrInvalidRSLEntry
 		}
-		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		key, value := strings.TrimSpace(key), strings.TrimSpace(rawValue)
 
 		switch key {
 		case EntryIDKey:
@@ -1353,7 +1352,7 @@ func parseAnnotationEntryText(id githash.Hash, text string) (*AnnotationEntry, e
 					return nil, ErrInvalidRSLEntry
 				}
 				state = done
-				setCustomField(&annotation.CustomFields, key, value)
+				setCustomField(&annotation.CustomFields, key, rawValue)
 			}
 		}
 	}
@@ -1388,11 +1387,11 @@ func parsePropagationEntryText(id githash.Hash, text string) (*PropagationEntry,
 	entry := &PropagationEntry{ID: id}
 	state := expectRef
 	for _, line := range body {
-		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		key, rawValue, ok := strings.Cut(line, ":")
 		if !ok {
 			return nil, ErrInvalidRSLEntry
 		}
-		key, value = strings.TrimSpace(key), strings.TrimSpace(value)
+		key, value := strings.TrimSpace(key), strings.TrimSpace(rawValue)
 
 		switch key {
 		case RefKey:
@@ -1444,7 +1443,7 @@ func parsePropagationEntryText(id githash.Hash, text string) (*PropagationEntry,
 					return nil, ErrInvalidRSLEntry
 				}
 				state = done
-				setCustomField(&entry.CustomFields, key, value)
+				setCustomField(&entry.CustomFields, key, rawValue)
 			}
 		}
 	}

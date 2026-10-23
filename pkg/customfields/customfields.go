@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 const (
@@ -29,22 +31,25 @@ const (
 	// MaxKeyLength characters, so a key of exactly this length is rejected.
 	MaxKeyLength = 250
 
-	// MaxValueLength bounds a value. A value must be fewer than
-	// MaxValueLength characters, so a value of exactly this length is
-	// rejected.
-	MaxValueLength = 500
+	// MaxValueLength bounds a value in bytes. A value must be fewer than
+	// MaxValueLength bytes, so a value of exactly this length is rejected.
+	// Git sets no limit on a ref name, so this matches Linux's PATH_MAX,
+	// which bounds the path of a loose ref.
+	MaxValueLength = 4096
 
 	// MaxCount is the largest number of fields a field set may carry. Unlike
 	// the length limits, it is inclusive: exactly MaxCount fields are valid.
 	MaxCount = 20
 
-	// ValuePunctuation is the punctuation a value may carry alongside ASCII
-	// letters and digits. It covers common value shapes: emails and handles
-	// (@), timestamps and URLs (:), base64 (=), and query strings (?, &, %, #,
-	// ~), as well as internal spaces. It is exported so an application that
-	// maps its own input into a value, such as a forge sanitizing a user
-	// handle, can do so against this alphabet instead of restating it.
-	ValuePunctuation = "-+./,()_ @:=%#?&~"
+	// ValuePunctuation is the ASCII punctuation a value may carry alongside
+	// ASCII letters and digits. It covers common value shapes: emails and
+	// handles (@), timestamps and URLs (:), base64 (=), and query strings (?,
+	// &, %, #, ~), as well as internal spaces. It also holds every printable
+	// ASCII character Git allows in a branch name. It is exported so an
+	// application that maps its own input into a value, such as a forge
+	// sanitizing a user handle, can do so against this alphabet instead of
+	// restating it.
+	ValuePunctuation = "-+./,()_ @:=%#?&~!\"$';<>]`{|}"
 )
 
 var (
@@ -58,9 +63,16 @@ var (
 	nameSegment = regexp.MustCompile(`^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$`)
 )
 
+// validValueRune reports whether r may appear in a value. Git accepts any
+// non-ASCII byte in a ref name, but non-graphic runes such as bidirectional
+// overrides and zero-width joiners could disguise a value when it is rendered,
+// so only graphic ones are allowed.
 func validValueRune(r rune) bool {
-	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
-		r >= '0' && r <= '9' || strings.ContainsRune(ValuePunctuation, r)
+	if r < utf8.RuneSelf {
+		return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' || strings.ContainsRune(ValuePunctuation, r)
+	}
+	return unicode.IsGraphic(r)
 }
 
 // Validate checks that the fields are well formed. A field set
@@ -86,11 +98,15 @@ func Validate(fields map[string]string) error {
 // carry '.', '_', and '-' in between. The whole key, Prefix included, must be
 // fewer than MaxKeyLength characters.
 //
-// A value is fewer than MaxValueLength characters, has no leading or trailing
-// spaces, and has every rune an ASCII letter, digit, or one of the characters
-// in ValuePunctuation. This is a check of a value's shape, so the empty string
-// passes. Emptiness means the field is absent, which writers handle by dropping
-// the field.
+// A value is valid UTF-8 of fewer than MaxValueLength bytes, has no leading or
+// trailing ASCII space, and has every rune an ASCII letter, digit, one of the
+// characters in ValuePunctuation, or a graphic non-ASCII rune
+// (unicode.IsGraphic). A non-ASCII space may lead or trail a value. Any branch
+// name Git accepts fits this alphabet, unless it carries invalid UTF-8 or a
+// non-graphic non-ASCII rune, such as a control, format, private-use, or
+// unassigned character. This is a check of a value's shape, so the empty
+// string passes. Emptiness means the field is absent, which writers handle by
+// dropping the field.
 func ValidateField(key, value string) error {
 	if !validKey(key) {
 		return fmt.Errorf("%w: invalid key %q", ErrInvalid, key)
@@ -133,13 +149,13 @@ func validNameSegment(name string) bool {
 // validValue reports whether value is a well-formed field value. See
 // ValidateField for the alphabet. The empty string passes.
 func validValue(value string) bool {
-	if len(value) >= MaxValueLength {
+	if len(value) >= MaxValueLength || !utf8.ValidString(value) {
 		return false
 	}
-	// The RSL entry parser trims each value, so a leading or trailing space
-	// would not round-trip and would desync from the signed bytes. Reject it
-	// on write.
-	if value != strings.TrimSpace(value) {
+	// The RSL entry parser trims ASCII whitespace from each value, so a
+	// leading or trailing space would not round-trip and would desync from
+	// the signed bytes. Space is the only ASCII whitespace in the alphabet.
+	if strings.HasPrefix(value, " ") || strings.HasSuffix(value, " ") {
 		return false
 	}
 	for _, character := range value {

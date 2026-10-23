@@ -6,6 +6,7 @@ package rsl
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/gittuf/gittuf/pkg/customfields"
 )
@@ -69,7 +70,13 @@ func appendCustomFieldLines(lines []string, fields CustomFields) ([]string, erro
 	return lines, nil
 }
 
-func setCustomField(fields *CustomFields, key, value string) {
+// asciiWhitespace is trimmed from a custom field value on read. Unicode spaces
+// are kept so that a value starting or ending with one round-trips, as Git
+// allows them in a branch name.
+const asciiWhitespace = " \t\n\v\f\r"
+
+func setCustomField(fields *CustomFields, key, rawValue string) {
+	value := strings.Trim(rawValue, asciiWhitespace)
 	if err := customfields.ValidateField(key, value); err != nil {
 		return
 	}

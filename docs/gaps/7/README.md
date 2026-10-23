@@ -60,12 +60,25 @@ application controls avoids collisions between applications writing to the
 same RSL.
 
 The whole key, including the `custom.` prefix, MUST be fewer than 250
-characters and MUST be unique within a canonical entry. Values MAY contain
-ASCII letters, digits, and the characters `-+./,()_@:=%#?&~` as well as
-internal spaces. This covers common value shapes such as emails, URLs,
-RFC 3339 timestamps, and base64. Values MUST NOT have leading or trailing
-spaces and MUST be fewer than 500 characters. An entry MUST NOT carry more
-than 20 custom fields.
+characters and MUST be unique within a canonical entry. Values MUST be valid
+UTF-8 and MAY contain ASCII letters, digits, the characters
+``-+./,()_@:=%#?&~!"$';<>]`{|}`` and internal spaces, as well as any graphic
+non-ASCII character. This covers common value shapes such as emails, URLs,
+RFC 3339 timestamps, and base64. It also covers every character Git permits
+in a branch name, so a branch name can be recorded as is. The exceptions are
+names carrying invalid UTF-8 or a non-ASCII character that is not graphic:
+controls, format characters such as bidirectional overrides and zero-width
+joiners, line and paragraph separators, private-use characters, and
+unassigned code points or noncharacters. Git accepts these, but they are
+rejected because they can disguise a value when it is displayed, or display
+differently across systems.
+
+Values MUST NOT have a leading or trailing ASCII space, but MAY start or end
+with a non-ASCII space such as U+00A0, as a branch name can. Values MUST be
+fewer than 4096 bytes. Git sets no limit on a ref name, so this cap is
+gittuf's own. It is sized after Linux's `PATH_MAX`, which bounds the path of a
+loose ref, so practical branch names fit. An entry MUST NOT carry more than 20
+custom fields.
 
 A recorded reference entry carrying one field looks like:
 
@@ -115,7 +128,8 @@ field is absent rather than present and blank.
 
 Readers require custom fields to appear after the standard fields and reject
 entries that interleave them, but accept the custom fields themselves in any
-order. When a non-canonical entry repeats a name, the reader uses the first
+order. A reader trims ASCII whitespace around a value and keeps everything
+else, so a value with a non-ASCII space at either end round-trips. When a non-canonical entry repeats a name, the reader uses the first
 value it encounters. A field whose key or value falls outside the grammar is
 ignored, as is a field with an empty value, and the total count is capped. The
 rule is the same on both sides, so a field a canonical writer could not have
@@ -289,9 +303,11 @@ The key grammar, value alphabet, and limits are implemented once in a shared
 validation package, so every entry type validates the same field set the same
 way. The reader and the writer both go through the same per-field validation,
 `ValidateField`, with the writer additionally enforcing the set-level count
-limit. The value alphabet is exported, so an application that maps its own input
-into a value, such as a forge sanitizing a user handle, sanitizes against the
-same alphabet gittuf validates rather than restating it.
+limit. The ASCII punctuation in the value alphabet is exported, so an
+application that maps its own input into a value, such as a forge sanitizing a
+user handle, sanitizes against the same alphabet gittuf validates rather than
+restating it. Non-ASCII characters are accepted when Go's `unicode.IsGraphic`
+reports them as graphic.
 
 The line encoding itself lives in the RSL package next to the parser rather
 than in the validation package, because it is the shape of an RSL entry body

@@ -33,12 +33,15 @@ func TestCustomFieldsRoundTrip(t *testing.T) {
 	fields := CustomFields{
 		"custom.example.com/z-field": "v1.2.3-rc.1/build(42),ok",
 		"custom.example.com/a-field": "hello world_ok",
+		"custom.example.com/branch":  "feature/{x}|y!$'`;<z>]\"/日本語",
+		"custom.example.com/padded":  "\u00a0feature/x\u3000",
 	}
 
 	tests := map[string]CustomFieldEntry{
-		"reference":   NewReferenceEntry("refs/heads/main", gitinterface.ZeroHash, WithCustomFields(fields)),
-		"annotation":  NewAnnotationEntry([]githash.Hash{gitinterface.ZeroHash}, false, "message", WithCustomFields(fields)),
-		"propagation": NewPropagationEntry("refs/heads/main", gitinterface.ZeroHash, "https://example.com/repository", gitinterface.ZeroHash, WithCustomFields(fields)),
+		"reference":                  NewReferenceEntry("refs/heads/main", gitinterface.ZeroHash, WithCustomFields(fields)),
+		"annotation":                 NewAnnotationEntry([]githash.Hash{gitinterface.ZeroHash}, false, "message", WithCustomFields(fields)),
+		"annotation without message": NewAnnotationEntry([]githash.Hash{gitinterface.ZeroHash}, false, "", WithCustomFields(fields)),
+		"propagation":                NewPropagationEntry("refs/heads/main", gitinterface.ZeroHash, "https://example.com/repository", gitinterface.ZeroHash, WithCustomFields(fields)),
 	}
 
 	for name, entry := range tests {
@@ -295,7 +298,10 @@ func TestParseRSLEntryTextDropsCustomFieldsOutsideTheGrammar(t *testing.T) {
 	tests := map[string]string{
 		"escape sequence in value": "custom.example.com/bad: \x1b[31mred",
 		"tab in value":             "custom.example.com/bad: a\tb",
-		"non-ascii value":          "custom.example.com/bad: café",
+		"bidi override in value":   "custom.example.com/bad: a\u202eb",
+		"invalid utf-8 in value":   "custom.example.com/bad: a\xffb",
+		"trailing next line":       "custom.example.com/bad: a\u0085",
+		"trailing line separator":  "custom.example.com/bad: a\u2028",
 		"uppercase key":            "custom.example.com/BAD: value",
 		"key without name":         "custom.example.com: value",
 		"key with bad domain":      "custom.-bad.com/field: value",
@@ -309,6 +315,29 @@ func TestParseRSLEntryTextDropsCustomFieldsOutsideTheGrammar(t *testing.T) {
 			entry, err := parseRSLEntryText(gitinterface.ZeroHash, message)
 			require.NoError(t, err)
 			assert.Equal(t, CustomFields{"custom.example.com/ok": "fine"}, entry.(*ReferenceEntry).CustomFields)
+		})
+	}
+}
+
+func TestParseRSLEntryTextTrimsOnlyASCIIWhitespaceFromCustomFieldValues(t *testing.T) {
+	tests := map[string]struct {
+		field    string
+		expected string
+	}{
+		"ascii whitespace":         {field: "  custom.example.com/field: \t value \r", expected: "value"},
+		"unicode space kept":       {field: "custom.example.com/field: \u00a0value\u00a0 ", expected: "\u00a0value\u00a0"},
+		"ideographic space kept":   {field: "custom.example.com/field: value\u3000", expected: "value\u3000"},
+		"internal whitespace kept": {field: "custom.example.com/field: a b", expected: "a b"},
+	}
+
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			message := fmt.Sprintf("%s\n\n%s: %s\n%s: %s\n%s",
+				ReferenceEntryHeader, RefKey, "refs/heads/main", TargetIDKey, gitinterface.ZeroHash.String(), test.field)
+
+			entry, err := parseRSLEntryText(gitinterface.ZeroHash, message)
+			require.NoError(t, err)
+			assert.Equal(t, CustomFields{"custom.example.com/field": test.expected}, entry.(*ReferenceEntry).CustomFields)
 		})
 	}
 }

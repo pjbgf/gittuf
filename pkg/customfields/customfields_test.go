@@ -31,11 +31,21 @@ func TestValidate(t *testing.T) {
 		"value trailing space": {"custom.example.com/field": "value "},
 		"value too long":       {"custom.example.com/field": strings.Repeat("a", MaxValueLength)},
 		"value with asterisk":  {"custom.example.com/field": "a*b"},
-		"value with quote":     {"custom.example.com/field": `a"b`},
 		"value with backslash": {"custom.example.com/field": `a\b`},
-		"value with semicolon": {"custom.example.com/field": "a;b"},
-		"value with angle":     {"custom.example.com/field": "<tag>"},
-		"non-ascii value":      {"custom.example.com/field": "café"},
+		"value with caret":     {"custom.example.com/field": "a^b"},
+		"value with bracket":   {"custom.example.com/field": "a[b"},
+		"value with tab":       {"custom.example.com/field": "a\tb"},
+		"value with del":       {"custom.example.com/field": "a\x7fb"},
+		"c1 control":           {"custom.example.com/field": "a\u009bb"},
+		"next line":            {"custom.example.com/field": "a\u0085b"},
+		"line separator":       {"custom.example.com/field": "a\u2028b"},
+		"bidi override":        {"custom.example.com/field": "a\u202eb"},
+		"zero width joiner":    {"custom.example.com/field": "a\u200db"},
+		"invalid utf-8":        {"custom.example.com/field": "a\xffb"},
+		"non-ascii too long":   {"custom.example.com/field": strings.Repeat("é", MaxValueLength/2)},
+		"paragraph separator":  {"custom.example.com/field": "a\u2029b"},
+		"private use":          {"custom.example.com/field": "a\ue000b"},
+		"noncharacter":         {"custom.example.com/field": "a\ufdd0b"},
 	}
 
 	for name, fields := range invalid {
@@ -46,22 +56,32 @@ func TestValidate(t *testing.T) {
 	}
 
 	valid := map[string]map[string]string{
-		"ulid":                {"custom.example.com/repository": "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
-		"symbols":             {"custom.example.com/field": "v1.2.3-rc.1/build(42),ok"},
-		"internal space":      {"custom.example.com/field": "hello world"},
-		"underscore":          {"custom.example.com/field": "hello_world"},
-		"single label domain": {"custom.example/field": "value"},
-		"subdomains":          {"custom.a.b.example.com/x-y_z.1": "value"},
-		"max name length":     {"custom.example.com/" + strings.Repeat("a", 63): "value"},
-		"max value length":    {"custom.example.com/field": strings.Repeat("a", MaxValueLength-1)},
-		"email":               {"custom.example.com/pusher": "paulo@example.com"},
-		"url":                 {"custom.example.com/source": "https://github.com/gittuf/gittuf?tab=readme#usage"},
-		"rfc3339 timestamp":   {"custom.example.com/pushed-at": "2026-08-18T10:04:05Z"},
-		"base64":              {"custom.example.com/digest": "q1w2e3r4=="},
-		"percent encoding":    {"custom.example.com/path": "a%20b"},
-		"tilde":               {"custom.example.com/ref": "HEAD~1"},
-		"handle with id":      {"custom.gitforge.com/pusher": "jane (01ARZ3NDEKTSV4RRFFQ69G5FAV)"},
-		"template version":    {"custom.gitforge.com/policy-template-version": "2026-03-11.4"},
+		"ulid":                 {"custom.example.com/repository": "01ARZ3NDEKTSV4RRFFQ69G5FAV"},
+		"symbols":              {"custom.example.com/field": "v1.2.3-rc.1/build(42),ok"},
+		"internal space":       {"custom.example.com/field": "hello world"},
+		"underscore":           {"custom.example.com/field": "hello_world"},
+		"single label domain":  {"custom.example/field": "value"},
+		"subdomains":           {"custom.a.b.example.com/x-y_z.1": "value"},
+		"max name length":      {"custom.example.com/" + strings.Repeat("a", 63): "value"},
+		"max value length":     {"custom.example.com/field": strings.Repeat("a", MaxValueLength-1)},
+		"email":                {"custom.example.com/pusher": "paulo@example.com"},
+		"url":                  {"custom.example.com/source": "https://github.com/gittuf/gittuf?tab=readme#usage"},
+		"rfc3339 timestamp":    {"custom.example.com/pushed-at": "2026-08-18T10:04:05Z"},
+		"base64":               {"custom.example.com/digest": "q1w2e3r4=="},
+		"percent encoding":     {"custom.example.com/path": "a%20b"},
+		"tilde":                {"custom.example.com/ref": "HEAD~1"},
+		"handle with id":       {"custom.gitforge.com/pusher": "jane (01ARZ3NDEKTSV4RRFFQ69G5FAV)"},
+		"template version":     {"custom.gitforge.com/policy-template-version": "2026-03-11.4"},
+		"value with quote":     {"custom.example.com/field": `a"b`},
+		"value with semicolon": {"custom.example.com/field": "a;b"},
+		"value with angle":     {"custom.example.com/field": "<tag>"},
+		"non-ascii value":      {"custom.example.com/field": "café"},
+		"branch name":          {"custom.example.com/branch": "refs/heads/feature/{x}|y!$'`;<z>]"},
+		"cjk branch name":      {"custom.example.com/branch": "feature/日本語"},
+		"internal nbsp":        {"custom.example.com/field": "a\u00a0b"},
+		"boundary nbsp":        {"custom.example.com/branch": "\u00a0feature/x\u00a0"},
+		"boundary ideographic": {"custom.example.com/branch": "feature/x\u3000"},
+		"multibyte max length": {"custom.example.com/field": strings.Repeat("é", (MaxValueLength-1)/2)},
 	}
 
 	for name, fields := range valid {
@@ -107,12 +127,27 @@ func TestValidateFieldValue(t *testing.T) {
 func TestValidValueRune(t *testing.T) {
 	t.Parallel()
 
-	for _, r := range "azAZ09" + ValuePunctuation {
+	for _, r := range "azAZ09é日" + ValuePunctuation {
 		assert.True(t, validValueRune(r), "expected %q to be valid", r)
 	}
-	for _, r := range "*\"\\;<>\n\t|$`é" {
+	for _, r := range "*\\^[\n\t\x7f\u0085\u009b\u200d\u202e\u2028" {
 		assert.False(t, validValueRune(r), "expected %q to be invalid", r)
 	}
+}
+
+// Git rejects control characters, space, and ~^:?*[\ in a ref name
+// component. See check_refname_component in Git's refs.c.
+func TestValueAcceptsEveryGitRefNameASCIICharacter(t *testing.T) {
+	t.Parallel()
+
+	var value strings.Builder
+	for r := rune(0x21); r < 0x7f; r++ {
+		if !strings.ContainsRune("~^:?*[\\", r) {
+			value.WriteRune(r)
+		}
+	}
+
+	assert.NoError(t, ValidateField("custom.example.com/branch", value.String()))
 }
 
 func TestValuePunctuationIsItselfAValidValue(t *testing.T) {
