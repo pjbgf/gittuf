@@ -36,3 +36,12 @@ func TestWithInitialRootKeys(t *testing.T) {
 
 	assert.Equal(t, []crypto.PublicKey{key}, options.InitialRootKeys)
 }
+
+func TestWithBypassRSL(t *testing.T) {
+	t.Parallel()
+
+	options := &Options{}
+	WithBypassRSL()(options)
+
+	assert.True(t, options.BypassRSL)
+}

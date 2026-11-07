@@ -13,6 +13,7 @@ type Options struct {
 	EntryID         githash.Hash
 	AtEntry         bool
 	InitialRootKeys []crypto.PublicKey
+	BypassRSL       bool
 }
 
 type Option func(o *Options)
@@ -35,5 +36,20 @@ func WithEntry(entryID githash.Hash) Option {
 func WithInitialRootKeys(keys ...crypto.PublicKey) Option {
 	return func(o *Options) {
 		o.InitialRootKeys = keys
+	}
+}
+
+// WithBypassRSL loads the policy from the commit the policy reference points
+// to, not from the RSL. The metadata signatures of that policy are verified.
+// The succession of roots that led to it is not. Use it only where every update
+// to the policy reference was verified when it was written.
+// A policy with controller metadata is refused, because controller metadata is
+// verified only for a policy loaded from the RSL.
+//
+// It cannot be combined with WithEntry or WithInitialRootKeys. Both depend on
+// the RSL history that this option skips.
+func WithBypassRSL() Option {
+	return func(o *Options) {
+		o.BypassRSL = true
 	}
 }

@@ -443,3 +443,157 @@ func stripSignaturesForTest(t *testing.T, store gitstore.Storer, treeID githash.
 
 	return unsigned
 }
+
+func TestStorerRepositoryLoadPolicyBypassRSL(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	params, _ := applyAuthoredPolicyForTest(t, store)
+	repo := NewStorerRepository(store)
+
+	replayed, err := repo.LoadPolicy(t.Context())
+	require.NoError(t, err)
+	bypassed, err := repo.LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	require.NoError(t, err)
+
+	assert.Equal(t, replayed.Root(), bypassed.Root())
+	assert.Equal(t, replayed.Principals(), bypassed.Principals())
+
+	rule, err := bypassed.Satisfies(authorTestRef, principalIDForTest(t, params.RSLSignerPublicKeys[0]))
+	require.NoError(t, err)
+	assert.Equal(t, authorPolicyRuleName, rule)
+}
+
+func TestStorerRepositoryLoadPolicyBypassRSLReadsTheLatestPolicy(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	applyTwoAuthoredPolicies(t, store)
+
+	loaded, err := NewStorerRepository(store).LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	require.NoError(t, err)
+	assert.Equal(t, uint64(2), loaded.Root().Version)
+}
+
+// A policy reference with no RSL entry loads, so the RSL is never read.
+func TestStorerRepositoryLoadPolicyBypassRSLDoesNotReadTheRSL(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	params, _ := authorPolicyParamsForTest(t)
+	tree, err := AuthorPolicy(t.Context(), store, params)
+	require.NoError(t, err)
+	_, err = store.Commit(tree, policy.PolicyRef, "Policy without an RSL entry", false)
+	require.NoError(t, err)
+	repo := NewStorerRepository(store)
+
+	loaded, err := repo.LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	require.NoError(t, err)
+	assert.Equal(t, uint64(1), loaded.Root().Version)
+
+	_, err = repo.LoadPolicy(t.Context())
+	assert.Error(t, err, "the replaying load needs the RSL")
+}
+
+func TestStorerRepositoryLoadPolicyBypassRSLVerifiesMetadata(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	params, _ := authorPolicyParamsForTest(t)
+	otherParams, _ := authorPolicyParamsForTest(t)
+
+	tree, err := AuthorPolicy(t.Context(), store, params)
+	require.NoError(t, err)
+	otherTree, err := AuthorPolicy(t.Context(), store, otherParams)
+	require.NoError(t, err)
+
+	files, err := store.GetAllFilesInTree(tree)
+	require.NoError(t, err)
+	otherFiles, err := store.GetAllFilesInTree(otherTree)
+	require.NoError(t, err)
+	const targetsPath = "metadata/targets.json"
+	require.Contains(t, files, targetsPath)
+	require.Contains(t, otherFiles, targetsPath)
+
+	// The rule file is signed by a root key that this root does not trust.
+	files[targetsPath] = otherFiles[targetsPath]
+	entries := make([]gitstore.TreeEntry, 0, len(files))
+	for path, id := range files {
+		entries = append(entries, gitstore.TreeEntry{Path: path, ID: id})
+	}
+	mixed, err := store.WriteTree(entries)
+	require.NoError(t, err)
+	_, err = store.Commit(mixed, policy.PolicyRef, "Policy with a foreign rule file", false)
+	require.NoError(t, err)
+
+	_, err = NewStorerRepository(store).LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	assert.ErrorContains(t, err, "does not verify")
+}
+
+func TestStorerRepositoryLoadPolicyBypassRSLWithoutPolicy(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+
+	_, err := NewStorerRepository(store).LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	assert.ErrorIs(t, err, gitstore.ErrReferenceNotFound)
+}
+
+func TestStorerRepositoryLoadPolicyBypassRSLRejectsControllerMetadata(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	params, _ := authorPolicyParamsForTest(t)
+	tree, err := AuthorPolicy(t.Context(), store, params)
+	require.NoError(t, err)
+
+	commitID, err := store.Commit(tree, "refs/gittuf/controller-source", "Policy", false)
+	require.NoError(t, err)
+	state, err := policy.LoadStateFromCommit(store, commitID)
+	require.NoError(t, err)
+	state.ControllerMetadata = map[string]*policy.StateMetadata{"controller": state.Metadata}
+	withControllers, err := state.WriteTree(store)
+	require.NoError(t, err)
+	_, err = store.Commit(withControllers, policy.PolicyRef, "Policy with a controller", false)
+	require.NoError(t, err)
+
+	_, err = NewStorerRepository(store).LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	assert.ErrorIs(t, err, ErrBypassRSLWithControllers)
+}
+
+func TestStorerRepositoryLoadPolicyBypassRSLRejectsUnsignedRoot(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	params, _ := authorPolicyParamsForTest(t)
+	tree, err := AuthorPolicy(t.Context(), store, params)
+	require.NoError(t, err)
+
+	unsigned := stripSignaturesForTest(t, store, tree)
+	_, err = store.Commit(unsigned, policy.PolicyRef, "Unsigned policy", false)
+	require.NoError(t, err)
+
+	_, err = NewStorerRepository(store).LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL())
+	assert.ErrorContains(t, err, "does not verify")
+}
+
+func TestStorerRepositoryLoadPolicyBypassRSLRejectsHistoryOptions(t *testing.T) {
+	t.Parallel()
+
+	store := gitinterface.CreateTestGitRepository(t, t.TempDir(), false)
+	params, _ := applyAuthoredPolicyForTest(t, store)
+	entryID, err := store.GetReference(rsl.Ref)
+	require.NoError(t, err)
+
+	for name, opt := range map[string]loadpolicyopts.Option{
+		"entry":             loadpolicyopts.WithEntry(entryID),
+		"initial root keys": loadpolicyopts.WithInitialRootKeys(params.RootPublicKeys...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := NewStorerRepository(store).LoadPolicy(t.Context(), loadpolicyopts.WithBypassRSL(), opt)
+			assert.ErrorIs(t, err, ErrBypassRSLWithHistory)
+		})
+	}
+}

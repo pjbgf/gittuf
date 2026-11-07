@@ -40,6 +40,15 @@ var ErrRefNotProtected = errors.New("no rule protects the reference")
 // not meet the policy protecting the reference.
 var ErrPolicyNotSatisfied = errors.New("principals do not satisfy the policy")
 
+// ErrBypassRSLWithHistory is returned by LoadPolicy when loadpolicy.WithBypassRSL
+// is combined with an option that depends on the RSL history.
+var ErrBypassRSLWithHistory = errors.New("bypassing the RSL cannot be combined with an RSL entry or initial root keys")
+
+// ErrBypassRSLWithControllers is returned by LoadPolicy when
+// loadpolicy.WithBypassRSL loads a policy that has controller metadata.
+// Controller metadata is verified only for a policy loaded from the RSL.
+var ErrBypassRSLWithControllers = errors.New("bypassing the RSL cannot load a policy with controller metadata")
+
 // StorerRepository verifies and inspects gittuf policy over any
 // gitstore.Storer. Repository is bound to an on-disk Git repository. This type
 // carries only the operations that need nothing beyond the Storer interface,
@@ -121,19 +130,17 @@ type Policy struct {
 // options it is the latest policy entry. See loadpolicy.WithEntry. The RSL tip
 // is read once and every later read uses it, so a concurrent rewrite cannot
 // change the history part way through a load.
+//
+// With loadpolicy.WithBypassRSL the policy is read from the policy reference
+// instead. Only its metadata signatures are verified, not the root transitions
+// that led to it.
 func (s *StorerRepository) LoadPolicy(ctx context.Context, opts ...loadpolicyopts.Option) (*Policy, error) {
 	options := &loadpolicyopts.Options{}
 	for _, fn := range opts {
 		fn(options)
 	}
 
-	rslTip, err := s.store.GetReference(rsl.Ref)
-	if err != nil {
-		return nil, err
-	}
-	store := rslSnapshot{Storer: s.store, rslTip: rslTip}
-
-	state, err := loadState(ctx, store, options)
+	state, err := s.loadPolicyState(ctx, options)
 	if err != nil {
 		return nil, err
 	}
@@ -208,6 +215,47 @@ func (p *Policy) Satisfies(refName string, principalIDs ...string) (string, erro
 	}
 
 	return rule, nil
+}
+
+func (s *StorerRepository) loadPolicyState(ctx context.Context, options *loadpolicyopts.Options) (*policy.State, error) {
+	if options.BypassRSL {
+		return loadStateFromPolicyRef(ctx, s.store, options)
+	}
+
+	rslTip, err := s.store.GetReference(rsl.Ref)
+	if err != nil {
+		return nil, err
+	}
+
+	return loadState(ctx, rslSnapshot{Storer: s.store, rslTip: rslTip}, options)
+}
+
+// loadStateFromPolicyRef loads the policy that the policy reference points to.
+// LoadStateFromCommit does not verify signatures, so Verify runs here.
+func loadStateFromPolicyRef(ctx context.Context, store gitstore.Storer, options *loadpolicyopts.Options) (*policy.State, error) {
+	if options.AtEntry || len(options.InitialRootKeys) != 0 {
+		return nil, ErrBypassRSLWithHistory
+	}
+
+	policyTip, err := store.GetReference(policy.PolicyRef)
+	if err != nil {
+		return nil, err
+	}
+
+	state, err := policy.LoadStateFromCommit(store, policyTip)
+	if err != nil {
+		return nil, err
+	}
+
+	if len(state.ControllerMetadata) != 0 {
+		return nil, ErrBypassRSLWithControllers
+	}
+
+	if err := state.Verify(ctx); err != nil {
+		return nil, fmt.Errorf("policy metadata does not verify: %w", err)
+	}
+
+	return state, nil
 }
 
 func loadState(ctx context.Context, store rslSnapshot, options *loadpolicyopts.Options) (*policy.State, error) {
